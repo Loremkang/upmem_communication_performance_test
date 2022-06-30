@@ -1,0 +1,6 @@
+build/
+
+.clangd/
+.vscode
+.DS_Store
+compile_commands.json
