@@ -1,5 +1,7 @@
 # Readme
 
+This program is to test the CPU-PIM communication performance (latency and bandwidth) under different workload setups (by both sync/async API).
+
 ## How to Run (Not tested on simulators)
 
 1. choose a config file you want (or write your own config file)
@@ -8,5 +10,5 @@
 
 ## Config File
 
-Config file defines the (communication related) workload you want.
+The config file defines the (communication related) workload you want.
 See the existing configurations as examples.
