@@ -1,0 +1,50 @@
+{
+    "nr_ranks" : 4,
+    "nr_iters" : 100,
+    "workload": [
+        {
+            "type" : "busywait",
+            "inst" : 100000
+        },
+        {
+            "type" : "busywait",
+            "inst" : 200000
+        },
+        {
+            "type" : "busywait",
+            "inst" : 400000
+        },
+        {
+            "type" : "busywait",
+            "inst" : 800000
+        },
+        {
+            "type" : "busywait",
+            "inst" : 1600000
+        },
+        {
+            "type" : "busywait",
+            "inst" : 3200000
+        },
+        {
+            "type" : "busywait",
+            "inst" : 6400000
+        },
+        {
+            "type" : "busywait",
+            "inst" : 12800000
+        },
+        {
+            "type" : "busywait",
+            "inst" : 25600000
+        },
+        {
+            "type" : "busywait",
+            "inst" : 51200000
+        },
+        {
+            "type" : "busywait",
+            "inst" : 102400000
+        }
+    ]
+}

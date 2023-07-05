@@ -1,0 +1,41 @@
+{
+    "nr_ranks" : 4,
+    "nr_iters" : 1000,
+    "workload": [
+        {
+            "type" : "send",
+            "total_length" : 32768,
+            "mode" : "sync"
+        },
+        {
+            "type" : "send",
+            "total_length" : 65536,
+            "mode" : "sync"
+        },
+        {
+            "type" : "send",
+            "total_length" : 131072,
+            "mode" : "sync"
+        },
+        {
+            "type" : "send",
+            "total_length" : 262144,
+            "mode" : "sync"
+        },
+        {
+            "type" : "send",
+            "total_length" : 524288,
+            "mode" : "sync"
+        },
+        {
+            "type" : "send",
+            "total_length" : 1048576,
+            "mode" : "sync"
+        },
+        {
+            "type" : "send",
+            "total_length" : 2097152,
+            "mode" : "sync"
+        }
+    ]
+}

@@ -1,0 +1,17 @@
+{
+    "nr_ranks" : 4,
+    "nr_iters" : 100,
+    "workload": [
+        {
+            "type" : "send",
+            "total_length" : 98304
+        },
+        {
+            "type" : "busywait",
+            "inst" : 100000
+        },
+        {
+            "type" : "sync"
+        }
+    ]
+}
