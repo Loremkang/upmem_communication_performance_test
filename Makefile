@@ -11,7 +11,7 @@ debug: CCFLAGS += -DXFER_BACK
 debug: host dpu
 
 host: host.cpp
-	$(CC) -o host host.cpp $(CCFLAGS)
+	$(CC) -o host host.cpp $(INCLUDE_LIBS) $(CCFLAGS)
 
 dpu: dpu.c
 	$(CCDPU) -o dpu dpu.c
