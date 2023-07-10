@@ -22,7 +22,7 @@ void fill() {
     for (int i = 0; i < 2; i ++) {
         printf("%x %x\n", buffer + i, buffer + i);
     }
-    printf("min=%16llx max=%16llx\n", buffer[0], buffer[BUFFERSIZE - 1]);
+    printf("id=%lld min=%16llx max=%16llx\n", DPU_ID, buffer[0], buffer[BUFFERSIZE - 1]);
 }
 
 // __mram uint64_t val[1 << 20];

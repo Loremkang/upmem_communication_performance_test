@@ -231,21 +231,39 @@ int main(int argc, char *argv[]) {
 
     pimInterface->PrintLog();
 
-    {
+    {   
         uint32_t COUNT = 8;
         uint32_t SIZE = COUNT * sizeof(uint64_t);
-        uint8_t** buffers = new uint8_t*[pimInterface->nr_of_dpus];
-        for (uint32_t i = 0; i < pimInterface->nr_of_dpus; i++) {
-            buffers[i] = new uint8_t[SIZE];
-            memset(buffers[i], 0, sizeof(buffers[i]));
-        }
-        pimInterface->ReceiveFromPIM(buffers, DPU_MRAM_HEAP_POINTER_NAME, 0, SIZE, false);
-        for (uint32_t i = 0; i < 10; i++) {
-            uint64_t* head = (uint64_t*) buffers[i];
-            for (int j = 0; j < COUNT; j ++) {
-                printf("buffers[%d][%d]=%16llx\n", i, j, head[j]);
+        // {
+        //     uint8_t** buffers = new uint8_t*[pimInterface->nr_of_dpus];
+        //     for (uint32_t i = 0; i < pimInterface->nr_of_dpus; i++) {
+        //         buffers[i] = new uint8_t[SIZE];
+        //         memset(buffers[i], 0, sizeof(buffers[i]));
+        //     }
+        //     pimInterface->ReceiveFromPIMByUPMEM(buffers, DPU_MRAM_HEAP_POINTER_NAME, 0, SIZE, false);
+        //     for (uint32_t i = 0; i < 10; i++) {
+        //         uint64_t* head = (uint64_t*) buffers[i];
+        //         for (int j = 0; j < COUNT; j ++) {
+        //             printf("buffers[%d][%d]=%16llx\n", i, j, head[j]);
+        //         }
+        //         printf("\n");
+        //     }
+        // }
+
+        {
+            uint8_t** buffers = new uint8_t*[pimInterface->nr_of_dpus];
+            for (uint32_t i = 0; i < pimInterface->nr_of_dpus; i++) {
+                buffers[i] = new uint8_t[SIZE];
+                memset(buffers[i], 0, sizeof(buffers[i]));
             }
-            printf("\n");
+            pimInterface->ReceiveFromPIM(buffers, DPU_MRAM_HEAP_POINTER_NAME, 0, SIZE, false);
+            // for (uint32_t i = 0; i < 10; i++) {
+            //     uint64_t* head = (uint64_t*) buffers[i];
+            //     for (int j = 0; j < COUNT; j ++) {
+            //         printf("buffers[%d][%d]=%16llx\n", i, j, head[j]);
+            //     }
+            //     printf("\n");
+            // }
         }
     }
 

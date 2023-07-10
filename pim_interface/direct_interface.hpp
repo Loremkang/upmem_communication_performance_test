@@ -70,6 +70,42 @@ class DirectPIMInterface : public PIMInterface {
             for (uint32_t dpu_id = 0; dpu_id < 8; dpu_id++) {
                 // 8 shards of DPUs
                 uint64_t address_offset = symbol_offset + (i * 8);
+                uint64_t offset = 0;
+
+                // 1 : address_offset < 64MB
+                offset += (512ll << 20) * (address_offset / (4 << 20));
+                address_offset %= (4ll << 20);
+
+                // 2 : address_offset < 4MB
+                if (address_offset & (16 << 10)) {
+                    offset += (256ll << 20);
+                }
+                offset += (2ll << 20) * (address_offset / (32 << 10));
+                address_offset %= (16 << 10);
+
+                // 3 : address_offset < 16K
+                if (address_offset & (8 << 10)) {
+                    offset += (1ll << 20);
+                }
+                address_offset %= (8 << 10);
+
+                // 4 : address_offset < 8K
+                offset += (dpu_id & 3) * (256 << 10);
+                offset += address_offset * 16;
+
+                // 5
+                if (dpu_id >= 4) {
+                    offset += 64;
+                }
+                __builtin_ia32_clflushopt((void *)ptr_dest + offset);
+            }
+        }
+        __builtin_ia32_mfence();
+
+        for (uint32_t i = 0; i < length / sizeof(uint64_t); i++) {
+            for (uint32_t dpu_id = 0; dpu_id < 8; dpu_id++) {
+                // 8 shards of DPUs
+                uint64_t address_offset = symbol_offset + (i * 8);
                 printf("off=%16llx ", address_offset);
                 uint64_t offset = 0;
 
@@ -95,12 +131,10 @@ class DirectPIMInterface : public PIMInterface {
                 offset += address_offset * 16;
 
                 // 5
-                if (dpu_id & 1) {
+                if (dpu_id >= 4) {
                     offset += 64;
                 }
                 printf("off2=%16llx ", offset);
-
-                __builtin_ia32_clflushopt((void *)ptr_dest + offset);
 
                 cache_line[0] =
                     *((volatile uint64_t *)((uint8_t *)ptr_dest + offset +
@@ -126,11 +160,14 @@ class DirectPIMInterface : public PIMInterface {
                 cache_line[7] =
                     *((volatile uint64_t *)((uint8_t *)ptr_dest + offset +
                                             7 * sizeof(uint64_t)));
+                for (int j = 0; j < 8; j ++) {
+                    printf("%16llx ", cache_line[j]);
+                }
                 byte_interleave_avx2(cache_line, cache_line_interleave);
                 printf("i=%u id=%d ", i, dpu_id);
-                for (int j = 0; j < 8; j ++) {
-                    printf("%16llx ", cache_line_interleave[j]);
-                }
+                // for (int j = 0; j < 8; j ++) {
+                //     printf("%16llx ", cache_line_interleave[j]);
+                // }
                 printf("\n");
                 // for (int j = 0; j < 8; j++) {
                 //     auto target = (uint64_t *)buffers[j * 8 + dpu_id];
