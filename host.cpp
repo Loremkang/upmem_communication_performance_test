@@ -192,7 +192,7 @@ auto runOneRound(auto &workload, uint8_t ***buffers) {
     return timeSpent;
 }
 
-PIMInterface* pimInterface = nullptr;
+DirectPIMInterface* pimInterface = nullptr;
 
 int main(int argc, char *argv[]) {
     string configJson = GetConfigFilename(argc, argv);
@@ -203,14 +203,12 @@ int main(int argc, char *argv[]) {
     int nr_ranks = config["nr_ranks"];
     int nr_dpus = nr_ranks * DPU_PER_RANK;
 
-    pimInterface = new UPMEMInterface();
+    pimInterface = new DirectPIMInterface();
     pimInterface->allocate(nr_ranks, DPU_BINARY);
 
     // DPU_ASSERT(dpu_alloc_ranks(nr_ranks, "nrJobsPerRank=256", &dpu_set));
     // DPU_ASSERT(dpu_alloc_ranks(nr_ranks, "nrThreadsPerRank=1", &dpu_set));
     // DPU_ASSERT(dpu_load(dpu_set, DPU_BINARY, NULL));
-
-
 
     {
         assert(pimInterface->nr_of_dpus == 256);
@@ -221,7 +219,7 @@ int main(int argc, char *argv[]) {
             *addr = i;
         }
         
-        pimInterface->SendToPIM(ids, "DPU_ID", 0, sizeof(uint64_t), false);
+        pimInterface->SendToPIMByUPMEM(ids, "DPU_ID", 0, sizeof(uint64_t), false);
 
         for (uint32_t i = 0; i < pimInterface->nr_of_dpus; i ++) {
             delete [] ids[i];
@@ -232,6 +230,24 @@ int main(int argc, char *argv[]) {
     pimInterface->Launch(false);
 
     pimInterface->PrintLog();
+
+    {
+        uint32_t COUNT = 8;
+        uint32_t SIZE = COUNT * sizeof(uint64_t);
+        uint8_t** buffers = new uint8_t*[pimInterface->nr_of_dpus];
+        for (uint32_t i = 0; i < pimInterface->nr_of_dpus; i++) {
+            buffers[i] = new uint8_t[SIZE];
+            memset(buffers[i], 0, sizeof(buffers[i]));
+        }
+        pimInterface->ReceiveFromPIM(buffers, DPU_MRAM_HEAP_POINTER_NAME, 0, SIZE, false);
+        for (uint32_t i = 0; i < 10; i++) {
+            uint64_t* head = (uint64_t*) buffers[i];
+            for (int j = 0; j < COUNT; j ++) {
+                printf("buffers[%d][%d]=%16llx\n", i, j, head[j]);
+            }
+            printf("\n");
+        }
+    }
 
     return 0;
 

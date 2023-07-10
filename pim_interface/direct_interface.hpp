@@ -65,12 +65,12 @@ class DirectPIMInterface : public PIMInterface {
         assert((uint64_t)symbol_offset + length <= MRAM_SIZE);
 
         uint64_t cache_line[8], cache_line_interleave[8];
-        uint64_t *buffer_filler = (uint64_t *)buffers;
 
         for (uint32_t i = 0; i < length / sizeof(uint64_t); i++) {
-            for (uint32_t dpu_id = 0; dpu_id < 8;
-                 dpu_id++) {  // 8 shards of DPUs
-                uint64_t address_offset = symbol_offset + i;
+            for (uint32_t dpu_id = 0; dpu_id < 8; dpu_id++) {
+                // 8 shards of DPUs
+                uint64_t address_offset = symbol_offset + (i * 8);
+                printf("off=%16llx ", address_offset);
                 uint64_t offset = 0;
 
                 // 1 : address_offset < 64MB
@@ -98,8 +98,10 @@ class DirectPIMInterface : public PIMInterface {
                 if (dpu_id & 1) {
                     offset += 64;
                 }
+                printf("off2=%16llx ", offset);
 
-                __builtin_ia32_clflushopt((void *)ptr_dest);
+                __builtin_ia32_clflushopt((void *)ptr_dest + offset);
+
                 cache_line[0] =
                     *((volatile uint64_t *)((uint8_t *)ptr_dest + offset +
                                             0 * sizeof(uint64_t)));
@@ -125,9 +127,15 @@ class DirectPIMInterface : public PIMInterface {
                     *((volatile uint64_t *)((uint8_t *)ptr_dest + offset +
                                             7 * sizeof(uint64_t)));
                 byte_interleave_avx2(cache_line, cache_line_interleave);
-                for (int j = 0; j < 8; j++) {
-                    buffer_filler[j * 8 + dpu_id] = cache_line_interleave[j];
+                printf("i=%u id=%d ", i, dpu_id);
+                for (int j = 0; j < 8; j ++) {
+                    printf("%16llx ", cache_line_interleave[j]);
                 }
+                printf("\n");
+                // for (int j = 0; j < 8; j++) {
+                //     auto target = (uint64_t *)buffers[j * 8 + dpu_id];
+                //     target[i] = cache_line_interleave[j];
+                // }
             }
         }
     }
@@ -151,9 +159,11 @@ class DirectPIMInterface : public PIMInterface {
                MRAM_ADDRESS_SPACE);  // should be a MRAM address
         symbol_offset += symbol.address ^ MRAM_ADDRESS_SPACE;
 
+        printf("Symbol Offset = %llx\n", symbol_offset);
+
         // Find physical address for each rank
         for (uint32_t i = 0; i < nr_of_ranks; i++) {
-            uint8_t **rank_buffers = buffers + i * DPU_PER_RANK;
+            uint8_t **rank_buffers = &buffers[i * DPU_PER_RANK];
             ReceiveFromRank(rank_buffers, symbol_offset, base_addrs[i], length);
         }
     }
@@ -198,6 +208,31 @@ class DirectPIMInterface : public PIMInterface {
     }
 
     ~DirectPIMInterface() { deallocate(); }
+
+    void SendToPIMByUPMEM(uint8_t **buffers, std::string symbol_name,
+                          uint32_t symbol_offset, uint32_t length,
+                          bool async_transfer) {
+        // Please make sure buffers don't overflow
+        DPU_FOREACH(dpu_set, dpu, each_dpu) {
+            DPU_ASSERT(dpu_prepare_xfer(dpu, buffers[each_dpu]));
+        }
+        auto sync_setup = async_transfer ? DPU_XFER_ASYNC : DPU_XFER_DEFAULT;
+        DPU_ASSERT(dpu_push_xfer(dpu_set, DPU_XFER_TO_DPU, symbol_name.c_str(),
+                                 symbol_offset, length, sync_setup));
+    }
+
+    void ReceiveFromPIMByUPMEM(uint8_t **buffers, std::string symbol_name,
+                               uint32_t symbol_offset, uint32_t length,
+                               bool async_transfer) {
+        // Please make sure buffers don't overflow
+        DPU_FOREACH(dpu_set, dpu, each_dpu) {
+            DPU_ASSERT(dpu_prepare_xfer(dpu, buffers[each_dpu]));
+        }
+        auto sync_setup = async_transfer ? DPU_XFER_ASYNC : DPU_XFER_DEFAULT;
+        DPU_ASSERT(dpu_push_xfer(dpu_set, DPU_XFER_FROM_DPU,
+                                 symbol_name.c_str(), symbol_offset, length,
+                                 sync_setup));
+    }
 
    private:
     void byte_interleave_avx2(uint64_t *input, uint64_t *output) {
