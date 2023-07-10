@@ -33,6 +33,15 @@ typedef struct _hw_dpu_rank_allocation_parameters_t {
     /* Backends specific */
     fpga_allocation_parameters_t fpga;
 } *hw_dpu_rank_allocation_parameters_t;
+
+#define DPU_REGION_MODE_UNDEFINED 0
+#define DPU_REGION_MODE_PERF 1
+#define DPU_REGION_MODE_SAFE 2
+#define DPU_REGION_MODE_HYBRID 3
+
+dpu_error_t dpu_switch_mux_for_rank(struct dpu_rank_t *rank,
+				    bool set_mux_for_host);
+
 }
 
 class DirectPIMInterface : public PIMInterface {
@@ -106,7 +115,7 @@ class DirectPIMInterface : public PIMInterface {
             for (uint32_t dpu_id = 0; dpu_id < 8; dpu_id++) {
                 // 8 shards of DPUs
                 uint64_t address_offset = symbol_offset + (i * 8);
-                printf("off=%16llx ", address_offset);
+                // printf("off=%16llx ", address_offset);
                 uint64_t offset = 0;
 
                 // 1 : address_offset < 64MB
@@ -134,7 +143,7 @@ class DirectPIMInterface : public PIMInterface {
                 if (dpu_id >= 4) {
                     offset += 64;
                 }
-                printf("off2=%16llx ", offset);
+                // printf("off2=%16llx ", offset);
 
                 cache_line[0] =
                     *((volatile uint64_t *)((uint8_t *)ptr_dest + offset +
@@ -160,19 +169,11 @@ class DirectPIMInterface : public PIMInterface {
                 cache_line[7] =
                     *((volatile uint64_t *)((uint8_t *)ptr_dest + offset +
                                             7 * sizeof(uint64_t)));
-                for (int j = 0; j < 8; j ++) {
-                    printf("%16llx ", cache_line[j]);
-                }
                 byte_interleave_avx2(cache_line, cache_line_interleave);
-                printf("i=%u id=%d ", i, dpu_id);
-                // for (int j = 0; j < 8; j ++) {
-                //     printf("%16llx ", cache_line_interleave[j]);
-                // }
-                printf("\n");
-                // for (int j = 0; j < 8; j++) {
-                //     auto target = (uint64_t *)buffers[j * 8 + dpu_id];
-                //     target[i] = cache_line_interleave[j];
-                // }
+                for (int j = 0; j < 8; j++) {
+                    auto target = (uint64_t *)buffers[j * 8 + dpu_id];
+                    target[i] = cache_line_interleave[j];
+                }
             }
         }
     }
@@ -188,6 +189,10 @@ class DirectPIMInterface : public PIMInterface {
         // Only suport synchronous transfer
         assert(!async_transfer);
 
+        for (int i = 0; i < nr_of_ranks; i ++) {
+            assert(params[i]->mode == DPU_REGION_MODE_PERF);
+        }
+
         // Find heap pointer address offset
         dpu_symbol_t symbol;
         DPU_ASSERT(
@@ -201,7 +206,10 @@ class DirectPIMInterface : public PIMInterface {
         // Find physical address for each rank
         for (uint32_t i = 0; i < nr_of_ranks; i++) {
             uint8_t **rank_buffers = &buffers[i * DPU_PER_RANK];
+            dpu_lock_rank(ranks[i]);
+            DPU_ASSERT(dpu_switch_mux_for_rank(ranks[i], true));
             ReceiveFromRank(rank_buffers, symbol_offset, base_addrs[i], length);
+            dpu_unlock_rank(ranks[i]);
         }
     }
 
@@ -210,14 +218,13 @@ class DirectPIMInterface : public PIMInterface {
         assert(this->nr_of_ranks == nr_of_ranks);
 
         ranks = new dpu_rank_t *[nr_of_ranks];
+        params = new hw_dpu_rank_allocation_parameters_t [nr_of_ranks];
         base_addrs = new uint8_t *[nr_of_ranks];
         for (uint32_t i = 0; i < nr_of_ranks; i++) {
             ranks[i] = dpu_set.list.ranks[i];
-            auto params =
-                (hw_dpu_rank_allocation_parameters_t)(ranks[i]
-                                                          ->description
-                                                          ->_internals.data);
-            base_addrs[i] = params->ptr_region;
+            params[i] = 
+                ((hw_dpu_rank_allocation_parameters_t)(ranks[i]->description->_internals.data));
+            base_addrs[i] = params[i]->ptr_region;
         }
 
         // find program pointer
@@ -297,6 +304,7 @@ class DirectPIMInterface : public PIMInterface {
 
     const int MRAM_ADDRESS_SPACE = 0x8000000;
     dpu_rank_t **ranks;
+    hw_dpu_rank_allocation_parameters_t *params;
     uint8_t **base_addrs;
     dpu_program_t *program;
 };
