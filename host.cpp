@@ -272,9 +272,15 @@ int main(int argc, char *argv[]) {
 
     int nr_iters = config["nr_iters"];
 
-    PIMInterface *pimInterface = new UPMEMInterface();
+    PIMInterface *pimInterface = nullptr;
+    if (config["interface_type"] == "direct") {
+        pimInterface = new DirectPIMInterface();
+    } else if (config["interface_type"] == "UPMEM") {
+        pimInterface = new UPMEMInterface();
+    }
     // printf("%016llx\n", pimInterface->get_correct_offset(0x12345678, 0));
     // exit(0);
+    assert(pimInterface != nullptr);
     pimInterface->allocate(config["nr_ranks"], DPU_BINARY);
 
     // experiments(pimInterface);
