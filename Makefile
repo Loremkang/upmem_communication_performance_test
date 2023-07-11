@@ -1,6 +1,6 @@
 CC = g++
 INCLUDE_LIBS = -Ithird_party/exprtk/include -Ithird_party/argparse/include -Ithird_party/json/include -Ipim_interface
-CCFLAGS = -Wall -Wextra -O0 `dpu-pkg-config --cflags --libs dpu` -lnuma -std=c++17 -g -march=native
+CCFLAGS = -Wall -Wextra -O3 `dpu-pkg-config --cflags --libs dpu` -lnuma -std=c++17 -march=native
 CCDPU = dpu-upmem-dpurte-clang
 
 .PHONY: all debug clean
@@ -10,7 +10,7 @@ debug: CCFLAGS += -DXFER_BACK
 # debug: CCFLAGS += -g -DXFER_BACK
 debug: host dpu
 
-host: host.cpp
+host: host.cpp pim_interface
 	$(CC) -o host host.cpp $(INCLUDE_LIBS) $(CCFLAGS)
 
 dpu: dpu.c

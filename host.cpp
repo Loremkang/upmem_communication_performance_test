@@ -134,16 +134,26 @@ void clearBuffer(auto &workload, uint8_t*** buffers, int nr_buffers) {
         string type = workload[i]["type"];
         if (type == "send" || type == "receive") {
             int bufferLength = workload[i]["buffer_length"];
+            assert((bufferLength % 8) == 0);
             for (int j = 0; j < nr_buffers; j++) {
-                for (int k = 0; k < bufferLength; k++) {
-                    buffers[i][j][k] = (uint8_t)rand();
+                uint64_t* arr = (uint64_t*)buffers[i][j];
+                for (int k = 0; k < bufferLength / 8; k++) {
+                    // buffers[i][j][k] = (uint8_t)rand();
+                    arr[k] ++;
+                    // buffers[i][j][k]++;
                 }
             }
         }
     }
 }
 
-auto runOneRound(auto &workload, uint8_t ***buffers) {
+inline double get_timestamp(){
+    timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    return ts.tv_sec + ts.tv_nsec / 1e9;
+}
+
+auto runOneRound(auto &workload, uint8_t ***buffers, PIMInterface* interface) {
     int workload_size = workload.size();
     vector<double> timeSpent;
     uint32_t each_dpu;
@@ -152,10 +162,15 @@ auto runOneRound(auto &workload, uint8_t ***buffers) {
     for (int i = 0; i < workload_size; i++) {
         string type = workload[i]["type"];
 
-        auto start_time = high_resolution_clock::now();
+        // auto start_time = high_resolution_clock::now();
+        auto start_time = get_timestamp();
         if (type == "send") {
             int heapOffset = workload[i]["offset"];
             int bufferLength = workload[i]["buffer_length"];
+            bool async = (workload[i]["mode"] != "sync");
+            // start_time = high_resolution_clock::now();
+            start_time = get_timestamp();
+            interface->SendToPIM(buffers[i], DPU_MRAM_HEAP_POINTER_NAME, heapOffset, bufferLength, async);
             // DPU_FOREACH(dpu_set, dpu, each_dpu) {
             //     DPU_ASSERT(dpu_prepare_xfer(dpu, buffers[i][each_dpu]));
             // }
@@ -167,6 +182,10 @@ auto runOneRound(auto &workload, uint8_t ***buffers) {
         } else if (type == "receive") {
             int heapOffset = workload[i]["offset"];
             int bufferLength = workload[i]["buffer_length"];
+            bool async = (workload[i]["mode"] != "sync");
+            // start_time = high_resolution_clock::now();
+            start_time = get_timestamp();
+            interface->ReceiveFromPIM(buffers[i], DPU_MRAM_HEAP_POINTER_NAME, heapOffset, bufferLength, async);
             // DPU_FOREACH(dpu_set, dpu, each_dpu) {
             //     DPU_ASSERT(dpu_prepare_xfer(dpu, buffers[i][each_dpu]));
             // }
@@ -176,8 +195,10 @@ auto runOneRound(auto &workload, uint8_t ***buffers) {
             //                          DPU_MRAM_HEAP_POINTER_NAME, heapOffset,
             //                          bufferLength, sync_setup));
         } else if (type == "sync") {
+            interface->sync();
             // DPU_ASSERT(dpu_sync(dpu_set));
         } else if (type == "exec") {
+            interface->Launch(false);
             // DPU_ASSERT(dpu_launch(dpu_set, DPU_ASYNCHRONOUS));
         } else if (type == "busywait") {
             int inst = workload[i]["inst"];
@@ -185,14 +206,64 @@ auto runOneRound(auto &workload, uint8_t ***buffers) {
         } else {
             assert(false);
         }
-        auto current_time = high_resolution_clock::now();
-        auto d = duration_cast<duration<double>>(current_time - start_time);
-        timeSpent.push_back(d.count());
+        // auto current_time = high_resolution_clock::now();
+        // auto d = (duration_cast<duration<double>>(current_time - start_time)).count;
+        auto d = get_timestamp() - start_time;
+        timeSpent.push_back(d);
     }
     return timeSpent;
 }
 
-DirectPIMInterface* pimInterface = nullptr;
+
+void experiments(PIMInterface* interface) {
+    {
+        assert(interface->nr_of_dpus == 256);
+        uint8_t **ids = new uint8_t *[interface->nr_of_dpus];
+        for (uint32_t i = 0; i < interface->nr_of_dpus; i++) {
+            ids[i] = new uint8_t[8];
+            uint64_t *addr = (uint64_t *)ids[i];
+            *addr = i;
+        }
+
+        interface->SendToPIMByUPMEM(ids, "DPU_ID", 0, sizeof(uint64_t),
+                                       false);
+        // interface->ReceiveFromPIMByUPMEM(ids, "DPU_ID", 0,
+        // sizeof(uint64_t), false);
+
+        for (uint32_t i = 0; i < interface->nr_of_dpus; i++) {
+            // uint64_t* addr = (uint64_t*)ids[i];
+            // assert(*addr == i);
+            delete[] ids[i];
+        }
+        delete[] ids;
+    }
+
+    {
+        uint32_t COUNT = 8;
+        uint32_t SIZE = COUNT * sizeof(uint64_t);
+
+        interface->Launch(false);
+
+        interface->PrintLog();
+
+        {
+            uint8_t **buffers = new uint8_t *[interface->nr_of_dpus];
+            for (uint32_t i = 0; i < interface->nr_of_dpus; i++) {
+                buffers[i] = new uint8_t[SIZE];
+                memset(buffers[i], 0, sizeof(buffers[i]));
+            }
+            interface->ReceiveFromPIM(buffers, DPU_MRAM_HEAP_POINTER_NAME,
+                                         10485760, SIZE, false);
+            for (uint32_t i = 0; i < 10; i++) {
+                uint64_t *head = (uint64_t *)buffers[i];
+                for (uint32_t j = 0; j < COUNT; j++) {
+                    printf("buffers[%d][%d]=%16llx\n", i, j, head[j]);
+                }
+                printf("\n");
+            }
+        }
+    }
+}
 
 int main(int argc, char *argv[]) {
     string configJson = GetConfigFilename(argc, argv);
@@ -200,160 +271,51 @@ int main(int argc, char *argv[]) {
     json config = json::parse(configFile);
 
     int nr_iters = config["nr_iters"];
-    int nr_ranks = config["nr_ranks"];
-    int nr_dpus = nr_ranks * DPU_PER_RANK;
 
-    pimInterface = new DirectPIMInterface();
-    pimInterface->allocate(nr_ranks, DPU_BINARY);
+    PIMInterface *pimInterface = new UPMEMInterface();
+    // printf("%016llx\n", pimInterface->get_correct_offset(0x12345678, 0));
+    // exit(0);
+    pimInterface->allocate(config["nr_ranks"], DPU_BINARY);
 
-    // DPU_ASSERT(dpu_alloc_ranks(nr_ranks, "nrJobsPerRank=256", &dpu_set));
-    // DPU_ASSERT(dpu_alloc_ranks(nr_ranks, "nrThreadsPerRank=1", &dpu_set));
-    // DPU_ASSERT(dpu_load(dpu_set, DPU_BINARY, NULL));
+    // experiments(pimInterface);
+    // exit(0);
 
-    {
-        assert(pimInterface->nr_of_dpus == 256);
-        uint8_t **ids = new uint8_t*[pimInterface->nr_of_dpus];
-        for (uint32_t i = 0; i < pimInterface->nr_of_dpus; i++) {
-            ids[i] = new uint8_t[8];
-            uint64_t* addr = (uint64_t*)ids[i];
-            *addr = i;
-        }
-        
-        pimInterface->SendToPIMByUPMEM(ids, "DPU_ID", 0, sizeof(uint64_t), false);
-        // pimInterface->ReceiveFromPIMByUPMEM(ids, "DPU_ID", 0, sizeof(uint64_t), false);
+    auto &workload = config["workload"];
+    int workload_size = workload.size();
+    assert(workload.is_array());
+    uint8_t ***buffers = initBuffer(workload, pimInterface->nr_of_dpus);
 
-        for (uint32_t i = 0; i < pimInterface->nr_of_dpus; i ++) {
-            // uint64_t* addr = (uint64_t*)ids[i];
-            // assert(*addr == i);
-            delete [] ids[i];
-        }
-        delete [] ids;
-    }
-
-    {
-        uint32_t COUNT = 8;
-        uint32_t SIZE = COUNT * sizeof(uint64_t);
-        // {
-        //     uint8_t **buffers = new uint8_t *[pimInterface->nr_of_dpus];
-        //     for (uint32_t i = 0; i < pimInterface->nr_of_dpus; i++) {
-        //         buffers[i] = new uint8_t[SIZE];
-        //         memset(buffers[i], 0, sizeof(buffers[i]));
-        //     }
-        //     pimInterface->ReceiveFromPIMByUPMEM(
-        //         buffers, DPU_MRAM_HEAP_POINTER_NAME, 0, SIZE, false);
-        //     for (uint32_t i = 0; i < 10; i++) {
-        //         uint64_t *head = (uint64_t *)buffers[i];
-        //         for (int j = 0; j < COUNT; j++) {
-        //             printf("buffers[%d][%d]=%16llx\n", i, j, head[j]);
-        //         }
-        //         printf("\n");
-        //     }
-        // }
-
-        pimInterface->Launch(false);
-
-        pimInterface->PrintLog();
-
-        {
-            uint8_t **buffers = new uint8_t *[pimInterface->nr_of_dpus];
-            for (uint32_t i = 0; i < pimInterface->nr_of_dpus; i++) {
-                buffers[i] = new uint8_t[SIZE];
-                memset(buffers[i], 0, sizeof(buffers[i]));
-            }
-            pimInterface->ReceiveFromPIM(buffers, DPU_MRAM_HEAP_POINTER_NAME, 0,
-                                         SIZE, false);
-            for (uint32_t i = 0; i < 10; i++) {
-                uint64_t* head = (uint64_t*) buffers[i];
-                for (int j = 0; j < COUNT; j ++) {
-                    printf("buffers[%d][%d]=%16llx\n", i, j, head[j]);
-                }
-                printf("\n");
-            }
+    vector<double> totalTimeSpent(workload_size);
+    for (int T = 0; T < nr_iters; T++) {
+        clearBuffer(workload, buffers, pimInterface->nr_of_dpus);
+        vector<double> timeSpent = runOneRound(workload, buffers, pimInterface);
+        json timeInfo(timeSpent);
+        cout << T << " " << timeInfo << endl;
+        for (int i = 0; i < workload_size; i++) {
+            totalTimeSpent[i] += timeSpent[i];
         }
     }
 
-    return 0;
+    for (int i = 0; i < workload_size; i++) {
+        cout << workload[i] << endl;
+    }
+    for (int i = 0; i < workload_size; i++) {
+        cout << (totalTimeSpent[i] / nr_iters) << endl;
+        config["workload"][i]["result"] = (totalTimeSpent[i] / nr_iters);
+    }
 
-    // dpu_mem_max_addr_t offset_address;
-    // {
-    //     uint32_t each_dpu;
-    //     dpu_set_t dpu;
-    //     dpu_program_t *program = nullptr;
-    //     DPU_FOREACH(dpu_set, dpu, each_dpu) {
-    //         assert(dpu.kind == DPU_SET_DPU);
-    //         dpu_t *dpuptr = dpu.dpu;
-    //         if (!dpu_is_enabled(dpuptr)) {
-    //             continue;
-    //         }
-    //         auto this_program = dpu_get_program(dpuptr);
-    //         if (program == nullptr) {
-    //             program = this_program;
-    //         }
-    //         assert(program == nullptr || program == this_program);
-    //     }
+    config["average_time"] =
+        (accumulate(totalTimeSpent.begin(), totalTimeSpent.end(), 0.0) /
+         nr_iters);
+    cout << (accumulate(totalTimeSpent.begin(), totalTimeSpent.end(), 0.0) /
+             nr_iters)
+         << endl;
 
-    //     dpu_symbol_t symbol;
-    //     const char *symbol_name = DPU_MRAM_HEAP_POINTER_NAME;
-    //     DPU_ASSERT(dpu_get_symbol(program, symbol_name, &symbol));
-    //     offset_address = symbol.address;
-    // }
+    auto resultFile = ofstream(configJson + "_result.json");
+    resultFile << config.dump(4) << endl;
+    cout << config.dump(4) << endl;
 
-    // printf("offset_address = %llx\n", offset_address);
-    // offset_address ^= 0x8000000;
-    // offset_address = 0x100000;
-
-    // dpu_rank_t **ranks = dpu_set.list.ranks;
-    // hw_dpu_rank_allocation_parameters_t params[4];
-    // for (int T = 0; T < 4; T++) {
-    //     params[T] =
-    //         (hw_dpu_rank_allocation_parameters_t)(ranks[T]
-    //                                                   ->description->_internals
-    //                                                   .data);
-    // }
-
-    // for (int i = 1; i <= 7; i++) {
-    //     if (i == 3) continue;
-    //     uint8_t *memory = params[1]->ptr_region;
-    //     printf("i=%d memory=%012llx\n", i, memory);
-    //     PrintCachelines((uint64_t *)memory);
-    // }
-
-    // return 0;
-
-    // auto &workload = config["workload"];
-    // int workload_size = workload.size();
-    // assert(workload.is_array());
-    // uint8_t ***buffers = initBuffer(workload);
-
-    // vector<double> totalTimeSpent(workload_size);
-    // for (int T = 0; T < nr_iters; T++) {
-    //     clearBuffer(workload, buffers);
-    //     vector<double> timeSpent = runOneRound(workload, buffers);
-    //     json timeInfo(timeSpent);
-    //     cout << timeInfo << endl;
-    //     for (int i = 0; i < workload_size; i++) {
-    //         totalTimeSpent[i] += timeSpent[i];
-    //     }
-    // }
-
-    // for (int i = 0; i < workload_size; i++) {
-    //     cout << workload[i] << endl;
-    //     cout << (totalTimeSpent[i] / nr_iters) << endl;
-    //     config["workload"][i]["result"] = (totalTimeSpent[i] / nr_iters);
-    // }
-
-    // config["average_time"] =
-    //     (accumulate(totalTimeSpent.begin(), totalTimeSpent.end(), 0.0) /
-    //      nr_iters);
-    // cout << (accumulate(totalTimeSpent.begin(), totalTimeSpent.end(), 0.0) /
-    //          nr_iters)
-    //      << endl;
-
-    // auto resultFile = ofstream(configJson + "_result.json");
-    // resultFile << config.dump(4) << endl;
-    // cout << config.dump(4) << endl;
-
-    // cout << busy_wait_a << endl;
+    cout << busy_wait_a << endl;
 
     return 0;
 }
