@@ -252,10 +252,10 @@ class DirectPIMInterface : public PIMInterface {
 
         // Find physical address for each rank
         for (uint32_t i = 0; i < nr_of_ranks; i++) {
-            uint8_t **rank_buffers = &buffers[i * DPU_PER_RANK];
+            // uint8_t **rank_buffers = &buffers[i * DPU_PER_RANK];
             // dpu_lock_rank(ranks[i]);
             DPU_ASSERT(dpu_switch_mux_for_rank(ranks[i], true)); // 2us
-            ReceiveFromRank(rank_buffers, symbol_offset, base_addrs[i], length);
+            ReceiveFromRank(&buffers[i * DPU_PER_RANK], symbol_offset, base_addrs[i], length);
             // dpu_unlock_rank(ranks[i]);
         }
     }
