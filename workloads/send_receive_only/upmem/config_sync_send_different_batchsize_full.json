@@ -5,6 +5,16 @@
     "workload": [
         {
             "type" : "send",
+            "total_length" : 8192,
+            "mode" : "sync"
+        },
+        {
+            "type" : "send",
+            "total_length" : 16384,
+            "mode" : "sync"
+        },
+        {
+            "type" : "send",
             "total_length" : 32768,
             "mode" : "sync"
         },

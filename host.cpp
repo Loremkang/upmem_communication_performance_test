@@ -170,7 +170,7 @@ auto runOneRound(auto &workload, uint8_t ***buffers, PIMInterface* interface) {
             bool async = (workload[i]["mode"] != "sync");
             // start_time = high_resolution_clock::now();
             start_time = get_timestamp();
-            interface->SendToPIM(buffers[i], DPU_MRAM_HEAP_POINTER_NAME, heapOffset, bufferLength, async);
+            interface->SendToPIM(buffers[i], DPU_MRAM_HEAP_POINTER_NAME, heapOffset + (4 << 20), bufferLength, async);
             // DPU_FOREACH(dpu_set, dpu, each_dpu) {
             //     DPU_ASSERT(dpu_prepare_xfer(dpu, buffers[i][each_dpu]));
             // }
@@ -185,7 +185,7 @@ auto runOneRound(auto &workload, uint8_t ***buffers, PIMInterface* interface) {
             bool async = (workload[i]["mode"] != "sync");
             // start_time = high_resolution_clock::now();
             start_time = get_timestamp();
-            interface->ReceiveFromPIM(buffers[i], DPU_MRAM_HEAP_POINTER_NAME, heapOffset, bufferLength, async);
+            interface->ReceiveFromPIM(buffers[i], DPU_MRAM_HEAP_POINTER_NAME, heapOffset + (4 << 20), bufferLength, async);
             // DPU_FOREACH(dpu_set, dpu, each_dpu) {
             //     DPU_ASSERT(dpu_prepare_xfer(dpu, buffers[i][each_dpu]));
             // }

@@ -2,9 +2,7 @@
 
 #include "pim_interface.hpp"
 #include <iostream>
-
-// #define NOINLINE __attribute__((noinline))
-#define NOINLINE
+#include <immintrin.h>
 
 extern "C" {
 #include <dpu_management.h>
@@ -52,58 +50,24 @@ class DirectPIMInterface : public PIMInterface {
    public:
     DirectPIMInterface() : PIMInterface() {
         ranks = nullptr;
+        params = nullptr;
         base_addrs = nullptr;
-    }
-
-    void SendToPIM(uint8_t **buffers, std::string symbol_name,
-                   uint32_t symbol_offset, uint32_t length,
-                   bool async_transfer) {
-        // Please make sure buffers don't overflow
-        (void)buffers;
-        (void)symbol_name;
-        (void)symbol_offset;
-        (void)length;
-        (void)async_transfer;
-        assert(false);
+        program = nullptr;
     }
 
     inline bool aligned(uint64_t offset, uint64_t factor) {
         return (offset % factor == 0);
     }
 
-    static uint32_t apply_address_translation_on_mram_offset(uint32_t byte_offset)
-    {
-        /* We have observed that, within the 26 address bits of the MRAM address, we need to apply an address translation:
-        *
-        * virtual[13: 0] = physical[13: 0]
-        * virtual[20:14] = physical[21:15]
-        * virtual[   21] = physical[   14]
-        * virtual[25:22] = physical[25:22]
-        *
-        * This function computes the "virtual" mram address based on the given "physical" mram address.
-        */
-
-        uint32_t mask_21_to_15 = ((1 << (21 - 15 + 1)) - 1) << 15;
-        uint32_t mask_21_to_14 = ((1 << (21 - 14 + 1)) - 1) << 14;
-        uint32_t bits_21_to_15 = (byte_offset & mask_21_to_15) >> 15;
-        uint32_t bit_14 = (byte_offset >> 14) & 1;
-        uint32_t unchanged_bits = byte_offset & ~mask_21_to_14;
-
-        return unchanged_bits | (bits_21_to_15 << 14) | (bit_14 << 21);
-    }
-
     inline uint64_t get_correct_offset_fast(uint64_t address_offset, uint32_t dpu_id) {
-        // uint64_t fastoffset = get_correct_offset_fast(address_offset, dpu_id);
-
         uint64_t mask_move_7 = (~((1 << 22) - 1)) + (1 << 13); // 31..22, 13
         uint64_t mask_move_6 = ((1 << 22) - (1 << 15)); // 21..15
         uint64_t mask_move_14 = (1 << 14); // 14
         uint64_t mask_move_4 = (1 << 13) - 1; // 12 .. 0
-
         return ((address_offset & mask_move_7) << 7) | ((address_offset & mask_move_6) << 6) | ((address_offset & mask_move_14) << 14) | ((address_offset & mask_move_4) << 4) | (dpu_id << 18);
     }
 
-    NOINLINE inline uint64_t get_correct_offset_golden(uint64_t address_offset, uint32_t dpu_id) {
+    inline uint64_t get_correct_offset_golden(uint64_t address_offset, uint32_t dpu_id) {
         // uint64_t fastoffset = get_correct_offset_fast(address_offset, dpu_id);
         uint64_t offset = 0;
 
@@ -137,7 +101,7 @@ class DirectPIMInterface : public PIMInterface {
         return offset;
     }
 
-    NOINLINE inline uint64_t get_correct_offset(uint64_t address_offset, uint32_t dpu_id) {
+    inline uint64_t get_correct_offset(uint64_t address_offset, uint32_t dpu_id) {
         // uint64_t v1 = get_correct_offset_golden(address_offset, dpu_id);
         // uint64_t v2 = get_correct_offset_fast(address_offset, dpu_id);
         // assert(v1 == v2);
@@ -145,7 +109,7 @@ class DirectPIMInterface : public PIMInterface {
         return get_correct_offset_fast(address_offset, dpu_id);
     }
 
-    NOINLINE void LoadData(uint64_t* cache_line, uint8_t* ptr_dest) {
+    void LoadData(uint64_t* cache_line, uint8_t* ptr_dest) {
         // printf("%016llx - %016llx\n", ptr_dest + offset, ptr_dest + offset + 0x40);
         // memcpy(cache_line, ptr_dest, sizeof(uint64_t) * 8);
         cache_line[0] =
@@ -174,7 +138,7 @@ class DirectPIMInterface : public PIMInterface {
                                     7 * sizeof(uint64_t)));
     }
 
-    NOINLINE void ReceiveFromRank(uint8_t **buffers, uint32_t symbol_offset,
+    void ReceiveFromRank(uint8_t **buffers, uint32_t symbol_offset,
                          uint8_t *ptr_dest, uint32_t length) {
         assert(aligned(symbol_offset, sizeof(uint64_t)));
         assert(aligned(length, sizeof(uint64_t)));
@@ -218,45 +182,137 @@ class DirectPIMInterface : public PIMInterface {
                 }
             }
         }
-        // exit(0);
     }
 
+    bool ValidAddress(uint8_t* address, int id) {
+        bool ok = true;
+        if (!(address >= base_addrs[id] + (512ull << 20))) {
+            ok = false;
+        }
+        if (!((address + 128) <= base_addrs[id] + (8ull << 30))) {
+            ok = false;
+        }
+        return ok;
+    }
 
-    void ReceiveFromPIM(uint8_t **buffers, std::string symbol_name,
-                        uint32_t symbol_offset, uint32_t length,
-                        bool async_transfer) {
-        // Please make sure buffers don't overflow
+    void SendToRank(uint8_t **buffers, uint32_t symbol_offset,
+                         uint8_t *ptr_dest, uint32_t length, int id) {
+        assert(aligned(symbol_offset, sizeof(uint64_t)));
+        assert(aligned(length, sizeof(uint64_t)));
+        assert((uint64_t)symbol_offset + length <= MRAM_SIZE);
 
-        // Only support heap pointer at present
-        assert(symbol_name == DPU_MRAM_HEAP_POINTER_NAME);
+        uint64_t cache_line[8];
 
-        // Only suport synchronous transfer
-        assert(!async_transfer);
+        for (uint32_t dpu_id = 0; dpu_id < 4; ++dpu_id) {
+            for (uint32_t i = 0; i < length / sizeof(uint64_t); ++i) {
+                if ((i % 8 == 0) && (i + 8 < length / sizeof(uint64_t))) {
+                    for (int j = 0; j < 16; j ++) {
+                        __builtin_prefetch(((uint64_t *)buffers[j * 4 + dpu_id]) + i + 8);
+                    }
+                }
+                uint64_t offset = get_correct_offset(symbol_offset + (i * 8), dpu_id);
 
-        for (int i = 0; i < nr_of_ranks; i ++) {
-            assert(params[i]->mode == DPU_REGION_MODE_PERF);
+                if (!ValidAddress(ptr_dest + offset, id)) {
+                    printf("ptr_dest=%016llx\n", ptr_dest);
+                    printf("base_addr=%016llx\n", base_addrs[id]);
+                    printf("offset=%d\n", offset);
+                    printf("id=%d\n", id);
+                    assert(false);
+                }
+
+                for (int j = 0; j < 8; j ++) {
+                    cache_line[j] = *(((uint64_t *)buffers[j * 8 + dpu_id]) + i);
+
+                }
+                byte_interleave_avx512(cache_line, (uint64_t*)(ptr_dest + offset), true);
+
+                offset += 0x40;
+                for (int j = 0; j < 8; j ++) {
+                    cache_line[j] = *(((uint64_t *)buffers[j * 8 + dpu_id + 4]) + i);
+                }
+                byte_interleave_avx512(cache_line, (uint64_t*)(ptr_dest + offset), true);
+            }
         }
 
+        __builtin_ia32_mfence();
+    }
 
-        // if (offset_list.find())
+    bool DirectAvailable(uint8_t **buffers, std::string symbol_name,
+                        uint32_t symbol_offset, uint32_t length,
+                        bool async_transfer) {
+        // Only support heap pointer at present
+        if (!(symbol_name == DPU_MRAM_HEAP_POINTER_NAME)) {
+            return false;
+        }
 
+        // Only suport synchronous transfer
+        if (async_transfer) {
+            return false;
+        }
+
+        for (int i = 0; i < nr_of_ranks; i ++) {
+            if (params[i]->mode != DPU_REGION_MODE_PERF) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    // Find heap pointer address offset
+    uint32_t GetSymbolOffset(std::string symbol_name) {
         // Find heap pointer address offset
         dpu_symbol_t symbol;
         DPU_ASSERT(
             dpu_get_symbol(program, DPU_MRAM_HEAP_POINTER_NAME, &symbol));
         assert(symbol.address &
                MRAM_ADDRESS_SPACE);  // should be a MRAM address
-        symbol_offset += symbol.address ^ MRAM_ADDRESS_SPACE;
+        return symbol.address ^ MRAM_ADDRESS_SPACE;
+    }
 
+    inline double get_timestamp() {
+        timespec ts;
+        clock_gettime(CLOCK_REALTIME, &ts);
+        return ts.tv_sec + ts.tv_nsec / 1e9;
+    }
+
+    void ReceiveFromPIM(uint8_t **buffers, std::string symbol_name,
+                        uint32_t symbol_offset, uint32_t length,
+                        bool async_transfer) {
+        // Please make sure buffers don't overflow
+        assert(DirectAvailable(buffers, symbol_name, symbol_offset, length,
+                               async_transfer));
+
+        symbol_offset += GetSymbolOffset(symbol_name);
         // printf("Symbol Offset = %llx\n", symbol_offset);
 
         // Find physical address for each rank
+        // #pramga omp parallel for num_threads(8)
         for (uint32_t i = 0; i < nr_of_ranks; i++) {
-            // uint8_t **rank_buffers = &buffers[i * DPU_PER_RANK];
-            // dpu_lock_rank(ranks[i]);
-            DPU_ASSERT(dpu_switch_mux_for_rank(ranks[i], true)); // 2us
-            ReceiveFromRank(&buffers[i * DPU_PER_RANK], symbol_offset, base_addrs[i], length);
-            // dpu_unlock_rank(ranks[i]);
+            dpu_lock_rank(ranks[i]);
+            DPU_ASSERT(dpu_switch_mux_for_rank(ranks[i], true));
+            ReceiveFromRank(&buffers[i * DPU_PER_RANK], symbol_offset,
+                            base_addrs[i], length);
+            dpu_unlock_rank(ranks[i]);
+        }
+    }
+
+    void SendToPIM(uint8_t **buffers, std::string symbol_name,
+                   uint32_t symbol_offset, uint32_t length,
+                   bool async_transfer) {
+        // Please make sure buffers don't overflow
+        assert(DirectAvailable(buffers, symbol_name, symbol_offset, length,
+                               async_transfer));
+
+        symbol_offset += GetSymbolOffset(symbol_name);
+
+        // Find physical address for each rank
+        for (uint32_t i = 0; i < nr_of_ranks; i++) {
+            dpu_lock_rank(ranks[i]);
+            DPU_ASSERT(dpu_switch_mux_for_rank(ranks[i], true));  // 2us
+            SendToRank(&buffers[i * DPU_PER_RANK], symbol_offset, base_addrs[i],
+                       length, i);
+            dpu_unlock_rank(ranks[i]);
         }
     }
 
@@ -265,12 +321,14 @@ class DirectPIMInterface : public PIMInterface {
         assert(this->nr_of_ranks == nr_of_ranks);
 
         ranks = new dpu_rank_t *[nr_of_ranks];
-        params = new hw_dpu_rank_allocation_parameters_t [nr_of_ranks];
+        params = new hw_dpu_rank_allocation_parameters_t[nr_of_ranks];
         base_addrs = new uint8_t *[nr_of_ranks];
         for (uint32_t i = 0; i < nr_of_ranks; i++) {
             ranks[i] = dpu_set.list.ranks[i];
-            params[i] = 
-                ((hw_dpu_rank_allocation_parameters_t)(ranks[i]->description->_internals.data));
+            params[i] =
+                ((hw_dpu_rank_allocation_parameters_t)(ranks[i]
+                                                           ->description
+                                                           ->_internals.data));
             base_addrs[i] = params[i]->ptr_region;
         }
 
@@ -300,8 +358,8 @@ class DirectPIMInterface : public PIMInterface {
 
     ~DirectPIMInterface() { deallocate(); }
 
-   private:
-    NOINLINE void byte_interleave_avx2(uint64_t *input, uint64_t *output) {
+    //    private:
+    void byte_interleave_avx2(uint64_t *input, uint64_t *output) {
         __m256i tm = _mm256_set_epi8(
             15, 11, 7, 3, 14, 10, 6, 2, 13, 9, 5, 1, 12, 8, 4, 0,
 
@@ -322,6 +380,35 @@ class DirectPIMInterface : public PIMInterface {
 
         _mm256_storeu_si256((__m256i *)&dst1[0], final0);
         _mm256_storeu_si256((__m256i *)&dst1[32], final1);
+    }
+
+    void byte_interleave_avx512(uint64_t *input, uint64_t *output,
+                                bool use_stream) {
+        __m512i mask;
+
+        mask = _mm512_set_epi64(0x0f0b07030e0a0602ULL, 0x0d0905010c080400ULL,
+
+                                0x0f0b07030e0a0602ULL, 0x0d0905010c080400ULL,
+
+                                0x0f0b07030e0a0602ULL, 0x0d0905010c080400ULL,
+
+                                0x0f0b07030e0a0602ULL, 0x0d0905010c080400ULL);
+
+        __m512i vindex = _mm512_setr_epi32(0, 8, 16, 24, 32, 40, 48, 56, 4, 12,
+                                           20, 28, 36, 44, 52, 60);
+        __m512i perm = _mm512_setr_epi32(0, 4, 1, 5, 2, 6, 3, 7, 8, 12, 9, 13,
+                                         10, 14, 11, 15);
+
+        __m512i load = _mm512_i32gather_epi32(vindex, input, 1);
+        __m512i transpose = _mm512_shuffle_epi8(load, mask);
+        __m512i final = _mm512_permutexvar_epi32(perm, transpose);
+
+        if (use_stream) {
+            _mm512_stream_si512((__m512i *)output, final);
+            return;
+        }
+
+        _mm512_storeu_si512((__m512i *)output, final);
     }
 
     const int MRAM_ADDRESS_SPACE = 0x8000000;
