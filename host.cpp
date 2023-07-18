@@ -272,11 +272,12 @@ int main(int argc, char *argv[]) {
 
     int nr_iters = config["nr_iters"];
 
-    PIMInterface *pimInterface = nullptr;
+    DirectPIMInterface *pimInterface = nullptr;
     if (config["interface_type"] == "direct") {
         pimInterface = new DirectPIMInterface();
     } else if (config["interface_type"] == "UPMEM") {
-        pimInterface = new UPMEMInterface();
+        // pimInterface = new UPMEMInterface();
+        assert(false);
     }
     // printf("%016llx\n", pimInterface->get_correct_offset(0x12345678, 0));
     // exit(0);
@@ -322,6 +323,12 @@ int main(int argc, char *argv[]) {
     cout << config.dump(4) << endl;
 
     cout << busy_wait_a << endl;
+
+
+    cout << "Total MUX: "; pimInterface->t.print();
+    cout << "Total t1: "; t1.print();
+    cout << "Total t2: "; t2.print();
+    cout << "Total t3: "; t3.print();
 
     return 0;
 }

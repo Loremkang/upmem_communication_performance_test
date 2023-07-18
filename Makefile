@@ -1,5 +1,5 @@
 CC = g++
-INCLUDE_LIBS = -Ithird_party/exprtk/include -Ithird_party/argparse/include -Ithird_party/json/include -Ipim_interface
+INCLUDE_LIBS = -Ithird_party/exprtk/include -Ithird_party/argparse/include -Ithird_party/json/include -Ipim_interface -Ipim_interface/sdk_internals_2023.2.0
 CCFLAGS = -Wall -Wextra -O3 `dpu-pkg-config --cflags --libs dpu` -std=c++17 -march=native
 CCDPU = dpu-upmem-dpurte-clang
 

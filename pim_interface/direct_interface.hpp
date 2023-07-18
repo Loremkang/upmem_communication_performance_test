@@ -3,6 +3,7 @@
 #include "pim_interface.hpp"
 #include <iostream>
 #include <immintrin.h>
+#include "timer.hpp"
 
 extern "C" {
 #include <dpu_management.h>
@@ -13,6 +14,7 @@ extern "C" {
 
 #include "dpu_region_address_translation.h"
 #include "hw_dpu_sysfs.h"
+#include "sdk_internal_functions.hpp"
 
 typedef struct _fpga_allocation_parameters_t {
     bool activate_ila;
@@ -41,8 +43,8 @@ typedef struct _hw_dpu_rank_allocation_parameters_t {
 #define DPU_REGION_MODE_SAFE 2
 #define DPU_REGION_MODE_HYBRID 3
 
-dpu_error_t dpu_switch_mux_for_rank(struct dpu_rank_t *rank,
-				    bool set_mux_for_host);
+// dpu_error_t dpu_switch_mux_for_rank(struct dpu_rank_t *rank,
+				    // bool set_mux_for_host);
 
 }
 
@@ -270,11 +272,7 @@ class DirectPIMInterface : public PIMInterface {
         return symbol.address ^ MRAM_ADDRESS_SPACE;
     }
 
-    inline double get_timestamp() {
-        timespec ts;
-        clock_gettime(CLOCK_REALTIME, &ts);
-        return ts.tv_sec + ts.tv_nsec / 1e9;
-    }
+    internal_timer t;
 
     void ReceiveFromPIM(uint8_t **buffers, std::string symbol_name,
                         uint32_t symbol_offset, uint32_t length,
@@ -290,11 +288,14 @@ class DirectPIMInterface : public PIMInterface {
         // #pramga omp parallel for num_threads(8)
         for (uint32_t i = 0; i < nr_of_ranks; i++) {
             dpu_lock_rank(ranks[i]);
-            DPU_ASSERT(dpu_switch_mux_for_rank(ranks[i], true));
+            t.start();
+            DPU_ASSERT(dpu_switch_mux_for_rank_expr(ranks[i], true));
+            t.end();
             ReceiveFromRank(&buffers[i * DPU_PER_RANK], symbol_offset,
                             base_addrs[i], length);
             dpu_unlock_rank(ranks[i]);
         }
+
     }
 
     void SendToPIM(uint8_t **buffers, std::string symbol_name,
@@ -309,7 +310,7 @@ class DirectPIMInterface : public PIMInterface {
         // Find physical address for each rank
         for (uint32_t i = 0; i < nr_of_ranks; i++) {
             dpu_lock_rank(ranks[i]);
-            DPU_ASSERT(dpu_switch_mux_for_rank(ranks[i], true));  // 2us
+            DPU_ASSERT(dpu_switch_mux_for_rank_expr(ranks[i], true));  // 2us
             SendToRank(&buffers[i * DPU_PER_RANK], symbol_offset, base_addrs[i],
                        length, i);
             dpu_unlock_rank(ranks[i]);

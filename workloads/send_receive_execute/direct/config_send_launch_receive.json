@@ -1,0 +1,30 @@
+{
+    "interface_type" : "direct",
+    "nr_ranks" : 4,
+    "nr_iters" : 1000,
+    "workload": [
+        {
+            "type" : "send",
+            "total_length" : 65536,
+            "mode" : "sync"
+        },
+        {
+            "type" : "receive",
+            "total_length" : 65536,
+            "mode" : "sync"
+        },
+        {
+            "type" : "exec"
+        },
+        {
+            "type" : "receive",
+            "total_length" : 65536,
+            "mode" : "sync"
+        },
+        {
+            "type" : "receive",
+            "total_length" : 65536,
+            "mode" : "sync"
+        }
+    ]
+}
