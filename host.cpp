@@ -326,6 +326,8 @@ int main(int argc, char *argv[]) {
 
 
     cout << "Total MUX: "; pimInterface->t.print();
+	// cout << "t_mux_select: "; t_mux_select.print();
+	// cout << "t_mux_read: "; t_mux_read.print();
     cout << "Total t1: "; t1.print();
     cout << "Total t2: "; t2.print();
     cout << "Total t3: "; t3.print();

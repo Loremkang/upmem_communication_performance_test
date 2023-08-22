@@ -21,8 +21,10 @@ u32 ufi_read_dma_ctrl(struct dpu_rank_t *rank, u8 ci_mask, u8 *data);
 
 /* Bit set when the DPU has the control of the bank */
 #define MUX_DPU_BANK_CTRL (1 << 0)
+
 /* Bit set when the DPU can write to the bank */
 #define MUX_DPU_WRITE_CTRL (1 << 1)
+
 /* Bit set when the DPU owns refresh */
 #define MUX_DPU_REFRESH_CTRL (1 << 2)
 
@@ -34,6 +36,8 @@ u32 ufi_read_dma_ctrl(struct dpu_rank_t *rank, u8 ci_mask, u8 *data);
 
 #define TIMEOUT_MUX_STATUS 100
 #define CMD_GET_MUX_CTRL 0x02
+
+// internal_timer t_mux_read, t_mux_select;
 
 static dpu_error_t
 dpu_check_wavegen_mux_status_for_rank_expr(struct dpu_rank_t *rank, uint8_t expected)
@@ -48,6 +52,8 @@ dpu_check_wavegen_mux_status_for_rank_expr(struct dpu_rank_t *rank, uint8_t expe
 		rank->description->hw.topology.nr_of_control_interfaces;
 	bool should_retry;
 	dpu_member_id_t each_dpu;
+
+	// int total_loop = 0;
 
 	LOG_RANK(VERBOSE, rank, "");
 
@@ -73,8 +79,12 @@ dpu_check_wavegen_mux_status_for_rank_expr(struct dpu_rank_t *rank, uint8_t expe
 			should_retry = false;
 
 			mask = ALL_CIS;
+			// t_mux_select.start();
 			FF(ufi_select_dpu_even_disabled(rank, &mask, each_dpu));
+			// t_mux_select.end();
+			// t_mux_read.start();
 			FF(ufi_read_dma_ctrl(rank, mask, result_array));
+			// t_mux_read.end();
 
 			for (each_slice = 0; each_slice < nr_cis;
 			     ++each_slice) {
@@ -94,9 +104,9 @@ dpu_check_wavegen_mux_status_for_rank_expr(struct dpu_rank_t *rank, uint8_t expe
 
 			timeout--;
 		} while (timeout &&
-			 should_retry); // Do not check Collision Error bit
-		
+			 should_retry); // Do not check Collision Error bit	
 
+		// total_loop += (TIMEOUT_MUX_STATUS - timeout);
 
 		if (!timeout) {
 			LOG_RANK(WARNING, rank,
@@ -108,7 +118,12 @@ dpu_check_wavegen_mux_status_for_rank_expr(struct dpu_rank_t *rank, uint8_t expe
 		}
 	}
 
+	// printf("nr_of_dpus = %d\n", (int)nr_dpus);
+	// printf("average loop = %lf\n", (double)total_loop / nr_dpus);
+
 end:
+	// t_mux_select.end();
+	// t_mux_read.end();
 	return status;
 }
 

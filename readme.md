@@ -36,14 +36,15 @@ dpu_switch_mux_for_rank
             ufi_select_all_even_disabled = 2 * exec_cmd
             ufi_write_dma_ctrl = 2 * exec_cmd
             ufi_clear_dma_ctrl = 2 * exec_cmd
-            LOOP 100:
-                ufi_select_dpu_even_disabled = 2 * exec_cmd
-                    UFI_exec_void_frames
-                ufi_read_dma_ctrl = 2 * exec_cmd
-                    UFI_exec_8bit_frame
-                        UFI_exec_write_structure
-                        ci_exec_8bit_cmd
-                            exec_cmd
+            LOOP 8(dpus per chip):
+                LOOP 100:
+                    ufi_select_dpu_even_disabled = 2 * exec_cmd
+                        UFI_exec_void_frames
+                    ufi_read_dma_ctrl = 2 * exec_cmd
+                        UFI_exec_8bit_frame
+                            UFI_exec_write_structure
+                            ci_exec_8bit_cmd
+                                exec_cmd
                 
 
 UFI_exec_void_frames = 2 * exec_cmd
