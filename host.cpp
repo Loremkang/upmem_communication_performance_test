@@ -156,8 +156,6 @@ inline double get_timestamp(){
 auto runOneRound(auto &workload, uint8_t ***buffers, PIMInterface* interface) {
     int workload_size = workload.size();
     vector<double> timeSpent;
-    uint32_t each_dpu;
-    dpu_set_t dpu;
 
     for (int i = 0; i < workload_size; i++) {
         string type = workload[i]["type"];
@@ -216,33 +214,34 @@ auto runOneRound(auto &workload, uint8_t ***buffers, PIMInterface* interface) {
 
 
 void experiments(PIMInterface* interface) {
-    {
-        assert(interface->nr_of_dpus == 256);
-        uint8_t **ids = new uint8_t *[interface->nr_of_dpus];
-        for (uint32_t i = 0; i < interface->nr_of_dpus; i++) {
-            ids[i] = new uint8_t[8];
-            uint64_t *addr = (uint64_t *)ids[i];
-            *addr = i;
-        }
+    // {
+    //     assert(interface->nr_of_dpus == 256);
+    //     uint8_t **ids = new uint8_t *[interface->nr_of_dpus];
+    //     for (uint32_t i = 0; i < interface->nr_of_dpus; i++) {
+    //         ids[i] = new uint8_t[8];
+    //         uint64_t *addr = (uint64_t *)ids[i];
+    //         *addr = i;
+    //     }
 
-        interface->SendToPIMByUPMEM(ids, "DPU_ID", 0, sizeof(uint64_t),
-                                       false);
-        // interface->ReceiveFromPIMByUPMEM(ids, "DPU_ID", 0,
-        // sizeof(uint64_t), false);
+    //     interface->SendToPIMByUPMEM(ids, "DPU_ID", 0, sizeof(uint64_t),
+    //                                    false);
+    //     // interface->ReceiveFromPIMByUPMEM(ids, "DPU_ID", 0,
+    //     // sizeof(uint64_t), false);
 
-        for (uint32_t i = 0; i < interface->nr_of_dpus; i++) {
-            // uint64_t* addr = (uint64_t*)ids[i];
-            // assert(*addr == i);
-            delete[] ids[i];
-        }
-        delete[] ids;
-    }
+    //     for (uint32_t i = 0; i < interface->nr_of_dpus; i++) {
+    //         // uint64_t* addr = (uint64_t*)ids[i];
+    //         // assert(*addr == i);
+    //         delete[] ids[i];
+    //     }
+    //     delete[] ids;
+    // }
 
     {
         uint32_t COUNT = 8;
         uint32_t SIZE = COUNT * sizeof(uint64_t);
 
         interface->Launch(false);
+        return;
 
         interface->PrintLog();
 
@@ -284,8 +283,8 @@ int main(int argc, char *argv[]) {
     assert(pimInterface != nullptr);
     pimInterface->allocate(config["nr_ranks"], DPU_BINARY);
 
-    // experiments(pimInterface);
-    // exit(0);
+    experiments(pimInterface);
+    exit(0);
 
     auto &workload = config["workload"];
     int workload_size = workload.size();

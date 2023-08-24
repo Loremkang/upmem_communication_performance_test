@@ -1,7 +1,7 @@
 {
     "interface_type" : "UPMEM",
-    "nr_ranks" : 4,
-    "nr_iters" : 1000,
+    "nr_ranks" : -1,
+    "nr_iters" : 100,
     "workload": [
         {
             "type" : "receive",

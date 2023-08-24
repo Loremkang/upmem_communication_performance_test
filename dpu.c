@@ -4,9 +4,9 @@
 #include <perfcounter.h>
 
 __host int64_t DPU_ID;
-const int SIZE = 60 << 20; // 60 MB
+const int SIZE = 6 << 20; // 6 MB
 const int BUFFERSIZE = SIZE / sizeof(uint64_t);
-// __mram uint64_t haha[1 << 20];
+__mram uint64_t haha[1 << 20];
 // __mram uint64_t buffer[BUFFERSIZE];
 
 void fill() {

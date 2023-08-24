@@ -25,8 +25,11 @@ class PIMInterface {
         DPU_ASSERT(dpu_get_nr_ranks(dpu_set, &this->nr_of_ranks));
         std::printf("Allocated %d DPU(s)\n", this->nr_of_dpus);
         std::printf("Allocated %d Ranks(s)\n", this->nr_of_ranks);
-        assert(this->nr_of_ranks == nr_of_ranks);
-        assert(this->nr_of_dpus == nr_of_ranks * DPU_PER_RANK);
+        if (nr_of_ranks != DPU_ALLOCATE_ALL) {
+            assert(this->nr_of_ranks == nr_of_ranks);
+            assert(this->nr_of_dpus == nr_of_ranks * DPU_PER_RANK);
+        }
+
     }
 
     virtual void deallocate() {

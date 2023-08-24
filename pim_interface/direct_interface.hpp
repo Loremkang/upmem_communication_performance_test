@@ -173,6 +173,9 @@ class DirectPIMInterface : public PIMInterface {
                 LoadData(cache_line, ptr_dest + offset);
                 byte_interleave_avx2(cache_line, cache_line_interleave);
                 for (int j = 0; j < 8; j++) {
+                    if (buffers[j * 8 + dpu_id] == nullptr) {
+                        continue;
+                    }
                     *(((uint64_t *)buffers[j * 8 + dpu_id]) + i) = cache_line_interleave[j];
                 }
 
@@ -180,6 +183,9 @@ class DirectPIMInterface : public PIMInterface {
                 LoadData(cache_line, ptr_dest + offset);
                 byte_interleave_avx2(cache_line, cache_line_interleave);
                 for (int j = 0; j < 8; j++) {
+                    if (buffers[j * 8 + dpu_id + 4] == nullptr) {
+                        continue;
+                    }
                     *(((uint64_t *)buffers[j * 8 + dpu_id + 4]) + i) = cache_line_interleave[j];
                 }
             }
@@ -242,6 +248,9 @@ class DirectPIMInterface : public PIMInterface {
     bool DirectAvailable(uint8_t **buffers, std::string symbol_name,
                         uint32_t symbol_offset, uint32_t length,
                         bool async_transfer) {
+        (void)buffers;
+        (void)symbol_offset;
+        (void)length;
         // Only support heap pointer at present
         if (!(symbol_name == DPU_MRAM_HEAP_POINTER_NAME)) {
             return false;
@@ -252,7 +261,7 @@ class DirectPIMInterface : public PIMInterface {
             return false;
         }
 
-        for (int i = 0; i < nr_of_ranks; i ++) {
+        for (uint32_t i = 0; i < nr_of_ranks; i ++) {
             if (params[i]->mode != DPU_REGION_MODE_PERF) {
                 return false;
             }
@@ -264,6 +273,7 @@ class DirectPIMInterface : public PIMInterface {
     // Find heap pointer address offset
     uint32_t GetSymbolOffset(std::string symbol_name) {
         // Find heap pointer address offset
+        assert(symbol_name == DPU_MRAM_HEAP_POINTER_NAME);
         dpu_symbol_t symbol;
         DPU_ASSERT(
             dpu_get_symbol(program, DPU_MRAM_HEAP_POINTER_NAME, &symbol));
@@ -286,16 +296,28 @@ class DirectPIMInterface : public PIMInterface {
 
         // Find physical address for each rank
         // #pramga omp parallel for num_threads(8)
+        uint32_t offset = 0;
+        uint8_t* buffers_alligned[nr_of_ranks * MAX_NR_DPUS_PER_RANK];
+        for (uint32_t i = 0; i < nr_of_ranks; i++) {
+            for (int j = 0; j < MAX_NR_DPUS_PER_RANK; j++) {
+                if (ranks[i]->dpus[j].enabled) {
+                    buffers_alligned[i * MAX_NR_DPUS_PER_RANK + j] = buffers[offset++];
+                } else {
+                    buffers_alligned[i * MAX_NR_DPUS_PER_RANK + j] = nullptr;
+                }
+            }
+        }
+        assert(offset == nr_of_dpus);
+
         for (uint32_t i = 0; i < nr_of_ranks; i++) {
             dpu_lock_rank(ranks[i]);
             t.start();
             DPU_ASSERT(dpu_switch_mux_for_rank_expr(ranks[i], true));
             t.end();
-            ReceiveFromRank(&buffers[i * DPU_PER_RANK], symbol_offset,
-                            base_addrs[i], length);
+            ReceiveFromRank(&buffers_alligned[i * MAX_NR_DPUS_PER_RANK], symbol_offset, base_addrs[i],
+                            length);
             dpu_unlock_rank(ranks[i]);
         }
-
     }
 
     void SendToPIM(uint8_t **buffers, std::string symbol_name,
@@ -310,7 +332,7 @@ class DirectPIMInterface : public PIMInterface {
         // Find physical address for each rank
         for (uint32_t i = 0; i < nr_of_ranks; i++) {
             dpu_lock_rank(ranks[i]);
-            DPU_ASSERT(dpu_switch_mux_for_rank_expr(ranks[i], true));  // 2us
+            DPU_ASSERT(dpu_switch_mux_for_rank_expr(ranks[i], true)); // 2us
             SendToRank(&buffers[i * DPU_PER_RANK], symbol_offset, base_addrs[i],
                        length, i);
             dpu_unlock_rank(ranks[i]);
@@ -319,7 +341,7 @@ class DirectPIMInterface : public PIMInterface {
 
     void allocate(uint32_t nr_of_ranks, std::string binary) {
         PIMInterface::allocate(nr_of_ranks, binary);
-        assert(this->nr_of_ranks == nr_of_ranks);
+        nr_of_ranks = this->nr_of_ranks;
 
         ranks = new dpu_rank_t *[nr_of_ranks];
         params = new hw_dpu_rank_allocation_parameters_t[nr_of_ranks];
