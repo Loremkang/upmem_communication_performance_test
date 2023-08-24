@@ -1,6 +1,6 @@
 {
     "interface_type" : "direct",
-    "nr_ranks" : -1,
+    "nr_ranks" : 20,
     "nr_iters" : 100,
     "workload": [
         {

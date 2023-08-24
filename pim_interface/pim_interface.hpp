@@ -27,9 +27,8 @@ class PIMInterface {
         std::printf("Allocated %d Ranks(s)\n", this->nr_of_ranks);
         if (nr_of_ranks != DPU_ALLOCATE_ALL) {
             assert(this->nr_of_ranks == nr_of_ranks);
-            assert(this->nr_of_dpus == nr_of_ranks * DPU_PER_RANK);
         }
-
+        assert(this->nr_of_dpus <= nr_of_ranks * DPU_PER_RANK);
     }
 
     virtual void deallocate() {
@@ -50,7 +49,9 @@ class PIMInterface {
     }
 
     void PrintLog() {
-        DPU_FOREACH(dpu_set, dpu) { DPU_ASSERT(dpu_log_read(dpu, stdout)); }
+        DPU_FOREACH(dpu_set, dpu, each_dpu) { 
+            printf("*** %d ***\n", each_dpu);
+            DPU_ASSERT(dpu_log_read(dpu, stdout)); }
     }
 
     virtual void SendToPIM(uint8_t** buffers, std::string symbol_name, uint32_t symbol_offset, uint32_t length, bool async) = 0;

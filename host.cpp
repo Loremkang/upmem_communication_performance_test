@@ -214,34 +214,33 @@ auto runOneRound(auto &workload, uint8_t ***buffers, PIMInterface* interface) {
 
 
 void experiments(PIMInterface* interface) {
-    // {
-    //     assert(interface->nr_of_dpus == 256);
-    //     uint8_t **ids = new uint8_t *[interface->nr_of_dpus];
-    //     for (uint32_t i = 0; i < interface->nr_of_dpus; i++) {
-    //         ids[i] = new uint8_t[8];
-    //         uint64_t *addr = (uint64_t *)ids[i];
-    //         *addr = i;
-    //     }
+    {
+        // assert(interface->nr_of_dpus == 256);
+        uint8_t **ids = new uint8_t *[interface->nr_of_dpus];
+        for (uint32_t i = 0; i < interface->nr_of_dpus; i++) {
+            ids[i] = new uint8_t[8];
+            uint64_t *addr = (uint64_t *)ids[i];
+            *addr = i;
+        }
 
-    //     interface->SendToPIMByUPMEM(ids, "DPU_ID", 0, sizeof(uint64_t),
-    //                                    false);
-    //     // interface->ReceiveFromPIMByUPMEM(ids, "DPU_ID", 0,
-    //     // sizeof(uint64_t), false);
+        interface->SendToPIMByUPMEM(ids, "DPU_ID", 0, sizeof(uint64_t),
+                                       false);
+        interface->ReceiveFromPIMByUPMEM(ids, "DPU_ID", 0,
+        sizeof(uint64_t), false);
 
-    //     for (uint32_t i = 0; i < interface->nr_of_dpus; i++) {
-    //         // uint64_t* addr = (uint64_t*)ids[i];
-    //         // assert(*addr == i);
-    //         delete[] ids[i];
-    //     }
-    //     delete[] ids;
-    // }
+        for (uint32_t i = 0; i < interface->nr_of_dpus; i++) {
+            uint64_t* addr = (uint64_t*)ids[i];
+            assert(*addr == i);
+            delete[] ids[i];
+        }
+        delete[] ids;
+    }
 
     {
         uint32_t COUNT = 8;
         uint32_t SIZE = COUNT * sizeof(uint64_t);
 
         interface->Launch(false);
-        return;
 
         interface->PrintLog();
 
@@ -253,10 +252,14 @@ void experiments(PIMInterface* interface) {
             }
             interface->ReceiveFromPIM(buffers, DPU_MRAM_HEAP_POINTER_NAME,
                                          10485760, SIZE, false);
-            for (uint32_t i = 0; i < 10; i++) {
+            // interface->ReceiveFromPIMByUPMEM(buffers, DPU_MRAM_HEAP_POINTER_NAME,
+            //                              10485760, SIZE, false);
+            for (uint32_t i = 0; i < interface->nr_of_dpus; i++) {
                 uint64_t *head = (uint64_t *)buffers[i];
                 for (uint32_t j = 0; j < COUNT; j++) {
                     printf("buffers[%d][%d]=%16llx\n", i, j, head[j]);
+                    uint64_t val = ((uint64_t)i << 32) + 10485760 + 1048576 + j * 8;
+                    assert(head[j] == val);
                 }
                 printf("\n");
             }
@@ -283,8 +286,8 @@ int main(int argc, char *argv[]) {
     assert(pimInterface != nullptr);
     pimInterface->allocate(config["nr_ranks"], DPU_BINARY);
 
-    experiments(pimInterface);
-    exit(0);
+    // experiments(pimInterface);
+    // exit(0);
 
     auto &workload = config["workload"];
     int workload_size = workload.size();
@@ -323,13 +326,16 @@ int main(int argc, char *argv[]) {
 
     cout << busy_wait_a << endl;
 
-
-    cout << "Total MUX: "; pimInterface->t.print();
-	// cout << "t_mux_select: "; t_mux_select.print();
-	// cout << "t_mux_read: "; t_mux_read.print();
-    cout << "Total t1: "; t1.print();
-    cout << "Total t2: "; t2.print();
-    cout << "Total t3: "; t3.print();
+    cout << "Total MUX: ";
+    pimInterface->t.print();
+    // cout << "t_mux_select: "; t_mux_select.print();
+    // cout << "t_mux_read: "; t_mux_read.print();
+    cout << "Total t1: ";
+    t1.print();
+    cout << "Total t2: ";
+    t2.print();
+    cout << "Total t3: ";
+    t3.print();
 
     return 0;
 }
