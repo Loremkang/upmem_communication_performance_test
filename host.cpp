@@ -165,7 +165,6 @@ auto runOneRound(auto& workload, auto& buffers) {
                                          DPU_MRAM_HEAP_POINTER_NAME,
                                          heapOffset, bufferLength,
                                          sync_setup));
-            // unfinished
         } else if (type == "receive") {
             int heapOffset = workload[i]["offset"];
             int bufferLength = workload[i]["buffer_length"];

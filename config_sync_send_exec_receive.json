@@ -1,0 +1,22 @@
+{
+    "nr_ranks" : 32,
+    "nr_iters" : 100,
+    "workload": [
+        {
+            "type" : "send",
+            "total_length" : 49152,
+            "mode" : "sync"
+        },
+        {
+            "type" : "exec"
+        },
+        {
+            "type" : "sync"
+        },
+        {
+            "type" : "receive",
+            "total_length" : 49152,
+            "mode" : "sync"
+        }
+    ]
+}
