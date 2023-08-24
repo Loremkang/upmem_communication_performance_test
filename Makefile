@@ -1,5 +1,5 @@
 CC = g++
-CCFLAGS = -Ithird_party -Ithird_party/argparse/include -Ithird_party/json/include -Wall -Wextra -O3 `dpu-pkg-config --cflags --libs dpu` -std=c++17
+CCFLAGS = -Ithird_party -Ithird_party/argparse/include -Ithird_party/json/include -Wall -Wextra -O3 `dpu-pkg-config --cflags --libs dpu` -std=c++17 -g
 CCDPU = dpu-upmem-dpurte-clang
 
 .PHONY: all debug clean

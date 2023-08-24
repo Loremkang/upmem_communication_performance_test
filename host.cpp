@@ -203,16 +203,16 @@ int main(int argc, char* argv[]) {
     nr_ranks = config["nr_ranks"];
     nr_dpus = nr_ranks * DPU_PER_RANK;
 
-    // DPU_ASSERT(dpu_alloc_ranks(nr_ranks, "nrJobsPerRank=256", &dpu_set));
-    DPU_ASSERT(dpu_alloc_ranks(nr_ranks, "nrThreadsPerRank=1", &dpu_set));
+    DPU_ASSERT(dpu_alloc_ranks(nr_ranks, "nrJobsPerRank=256", &dpu_set));
+    // DPU_ASSERT(dpu_alloc_ranks(nr_ranks, "nrThreadsPerRank=1", &dpu_set));
     DPU_ASSERT(dpu_load(dpu_set, DPU_BINARY, NULL));
 
     {
-        uint32_t nr_of_dpus = 0, nr_of_ranks = 0;
-        DPU_ASSERT(dpu_get_nr_dpus(dpu_set, &nr_of_dpus));
-        DPU_ASSERT(dpu_get_nr_ranks(dpu_set, &nr_of_ranks));
-        printf("Allocated %d DPU(s)\n", nr_of_dpus);
-        printf("Allocated %d Ranks(s)\n", nr_of_ranks);
+        // uint32_t nr_of_dpus = 0, nr_of_ranks = 0;
+        DPU_ASSERT(dpu_get_nr_dpus(dpu_set, (uint32_t*)&nr_dpus));
+        DPU_ASSERT(dpu_get_nr_ranks(dpu_set, (uint32_t*)&nr_ranks));
+        printf("Allocated %d DPU(s)\n", nr_dpus);
+        printf("Allocated %d Ranks(s)\n", nr_ranks);
     }
 
     auto& workload = config["workload"];
