@@ -9,6 +9,7 @@
 #include <unistd.h>
 #include <x86intrin.h>
 #include "pim_interface_header.hpp"
+#include "parlay/parallel.h"
 
 #include <chrono>
 #include <fstream>
@@ -237,7 +238,29 @@ void experiments(PIMInterface* interface) {
     }
 
     {
-        uint32_t COUNT = 8;
+        uint32_t COUNT = 1024 * 1024;
+        uint32_t SIZE = COUNT * sizeof(uint64_t);
+        // assert(interface->nr_of_dpus == 256);
+        uint8_t **ids = new uint8_t *[interface->nr_of_dpus];
+        parlay::parallel_for(0, interface->nr_of_dpus, [&](size_t i) {
+            ids[i] = new uint8_t[SIZE];
+            uint64_t *addr = (uint64_t *)ids[i];
+            for (uint32_t k = 0; k < COUNT; k ++) {
+                addr[k] = parlay::hash64(k) * i;
+            }
+        });
+
+        interface->SendToPIMByUPMEM(ids, DPU_MRAM_HEAP_POINTER_NAME, 10485760, SIZE,
+                                       false);
+        for (uint32_t i = 0; i < interface->nr_of_dpus; i++) {
+            delete[] ids[i];
+        }
+        delete[] ids;
+    }
+
+
+    {
+        uint32_t COUNT = 1024 * 1024;
         uint32_t SIZE = COUNT * sizeof(uint64_t);
 
         interface->Launch(false);
@@ -246,23 +269,36 @@ void experiments(PIMInterface* interface) {
 
         {
             uint8_t **buffers = new uint8_t *[interface->nr_of_dpus];
-            for (uint32_t i = 0; i < interface->nr_of_dpus; i++) {
+            parlay::parallel_for(0, interface->nr_of_dpus, [&](size_t i) {
                 buffers[i] = new uint8_t[SIZE];
-                memset(buffers[i], 0, sizeof(buffers[i]));
-            }
+            });
             interface->ReceiveFromPIM(buffers, DPU_MRAM_HEAP_POINTER_NAME,
                                          10485760, SIZE, false);
             // interface->ReceiveFromPIMByUPMEM(buffers, DPU_MRAM_HEAP_POINTER_NAME,
             //                              10485760, SIZE, false);
-            for (uint32_t i = 0; i < interface->nr_of_dpus; i++) {
-                uint64_t *head = (uint64_t *)buffers[i];
-                for (uint32_t j = 0; j < COUNT; j++) {
-                    printf("buffers[%d][%d]=%16llx\n", i, j, head[j]);
-                    uint64_t val = ((uint64_t)i << 32) + 10485760 + 1048576 + j * 8;
-                    assert(head[j] == val);
+            parlay::parallel_for(0, interface->nr_of_dpus, [&](size_t i) {
+                uint64_t *addr = (uint64_t *)buffers[i];
+                for (uint32_t k = 0; k < COUNT; k ++) {
+                    uint64_t val = ((uint64_t)i << 48) + 11ll * 1024 * 1024 + k * 8 + parlay::hash64(k) * i;
+                    assert(addr[k] == val);
+                    if (k < 2) {
+                        printf("buffers[%d][%d]=%16llx\n", i, k, addr[k]);
+                    }
                 }
-                printf("\n");
+            });
+            // for (uint32_t i = 0; i < interface->nr_of_dpus; i++) {
+            //     uint64_t *head = (uint64_t *)buffers[i];
+            //     for (uint32_t j = 0; j < COUNT; j++) {
+            //         printf("buffers[%d][%d]=%16llx\n", i, j, head[j]);
+            //         uint64_t val = ((uint64_t)i << 32) + 10485760 + 1048576 + j * 8;
+            //         // assert(head[j] == val);
+            //     }
+            //     printf("\n");
+            // }
+            for (uint32_t i = 0; i < interface->nr_of_dpus; i++) {
+                delete[] buffers[i];
             }
+            delete[] buffers;
         }
     }
 }
@@ -274,12 +310,12 @@ int main(int argc, char *argv[]) {
 
     int nr_iters = config["nr_iters"];
 
-    DirectPIMInterface *pimInterface = nullptr;
+    PIMInterface *pimInterface = nullptr;
     if (config["interface_type"] == "direct") {
         pimInterface = new DirectPIMInterface();
     } else if (config["interface_type"] == "UPMEM") {
-        // pimInterface = new UPMEMInterface();
-        assert(false);
+        pimInterface = new UPMEMInterface();
+        // assert(false);
     }
     // printf("%016llx\n", pimInterface->get_correct_offset(0x12345678, 0));
     // exit(0);
@@ -310,7 +346,10 @@ int main(int argc, char *argv[]) {
     }
     for (int i = 0; i < workload_size; i++) {
         cout << (totalTimeSpent[i] / nr_iters) << endl;
-        config["workload"][i]["result"] = (totalTimeSpent[i] / nr_iters);
+        config["workload"][i]["latency"] = (totalTimeSpent[i] / nr_iters);
+        uint64_t buf_len = config["workload"][i]["buffer_length"];
+        uint64_t communication = buf_len * pimInterface->nr_of_ranks * MAX_NR_DPUS_PER_RANK;
+        config["workload"][i]["bandwidth"] = communication / (totalTimeSpent[i] / nr_iters) / 1e9;
     }
 
     config["average_time"] =
@@ -326,16 +365,16 @@ int main(int argc, char *argv[]) {
 
     cout << busy_wait_a << endl;
 
-    cout << "Total MUX: ";
-    pimInterface->t.print();
+    // cout << "Total MUX: ";
+    // pimInterface->t.print();
     // cout << "t_mux_select: "; t_mux_select.print();
     // cout << "t_mux_read: "; t_mux_read.print();
-    cout << "Total t1: ";
-    t1.print();
-    cout << "Total t2: ";
-    t2.print();
-    cout << "Total t3: ";
-    t3.print();
+    // cout << "Total t1: ";
+    // t1.print();
+    // cout << "Total t2: ";
+    // t2.print();
+    // cout << "Total t3: ";
+    // t3.print();
 
     return 0;
 }

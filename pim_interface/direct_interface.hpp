@@ -3,6 +3,8 @@
 #include "pim_interface.hpp"
 #include <iostream>
 #include <immintrin.h>
+#include "parlay/parallel.h"
+#include "parlay/internal/sequence_ops.h"
 #include "timer.hpp"
 
 extern "C" {
@@ -229,13 +231,18 @@ class DirectPIMInterface : public PIMInterface {
                 }
 
                 for (int j = 0; j < 8; j ++) {
+                    if (buffers[j * 8 + dpu_id] == nullptr) {
+                        continue;
+                    }
                     cache_line[j] = *(((uint64_t *)buffers[j * 8 + dpu_id]) + i);
-
                 }
                 byte_interleave_avx512(cache_line, (uint64_t*)(ptr_dest + offset), true);
 
                 offset += 0x40;
                 for (int j = 0; j < 8; j ++) {
+                    if (buffers[j * 8 + dpu_id + 4] == nullptr) {
+                        continue;
+                    }
                     cache_line[j] = *(((uint64_t *)buffers[j * 8 + dpu_id + 4]) + i);
                 }
                 byte_interleave_avx512(cache_line, (uint64_t*)(ptr_dest + offset), true);
@@ -294,30 +301,83 @@ class DirectPIMInterface : public PIMInterface {
         symbol_offset += GetSymbolOffset(symbol_name);
         // printf("Symbol Offset = %llx\n", symbol_offset);
 
-        // Find physical address for each rank
-        // #pramga omp parallel for num_threads(8)
-        uint32_t offset = 0;
-        uint8_t* buffers_alligned[nr_of_ranks * MAX_NR_DPUS_PER_RANK];
-        for (uint32_t i = 0; i < nr_of_ranks; i++) {
-            for (int j = 0; j < MAX_NR_DPUS_PER_RANK; j++) {
-                if (ranks[i]->dpus[j].enabled) {
-                    buffers_alligned[i * MAX_NR_DPUS_PER_RANK + j] = buffers[offset++];
-                } else {
-                    buffers_alligned[i * MAX_NR_DPUS_PER_RANK + j] = nullptr;
+        // Skip disabled PIM modules
+        uint8_t* buffers_alligned[MAX_NR_RANKS * MAX_NR_DPUS_PER_RANK];
+        {
+            uint32_t offset = 0;
+            for (uint32_t i = 0; i < nr_of_ranks; i++) {
+                for (int j = 0; j < MAX_NR_DPUS_PER_RANK; j++) {
+                    if (ranks[i]->dpus[j].enabled) {
+                        buffers_alligned[i * MAX_NR_DPUS_PER_RANK + j] = buffers[offset++];
+                    } else {
+                        buffers_alligned[i * MAX_NR_DPUS_PER_RANK + j] = nullptr;
+                    }
                 }
             }
+            assert(offset == nr_of_dpus);
         }
-        assert(offset == nr_of_dpus);
 
-        for (uint32_t i = 0; i < nr_of_ranks; i++) {
-            dpu_lock_rank(ranks[i]);
-            t.start();
+        parlay::parallel_for(0, nr_of_ranks, [&](size_t i) {
             DPU_ASSERT(dpu_switch_mux_for_rank_expr(ranks[i], true));
-            t.end();
-            ReceiveFromRank(&buffers_alligned[i * MAX_NR_DPUS_PER_RANK], symbol_offset, base_addrs[i],
-                            length);
-            dpu_unlock_rank(ranks[i]);
-        }
+            ReceiveFromRank(&buffers_alligned[i * MAX_NR_DPUS_PER_RANK],
+                            symbol_offset, base_addrs[i], length);
+        }, 1, false);
+
+        // unused. too slow for unknown reason.
+        // auto fine_grained_work_stealing = [&]() {
+        //     size_t total_work = nr_of_ranks * length;
+        //     size_t block_size = 204800 / MAX_NR_DPUS_PER_RANK;
+        //     parlay::internal::sliced_for(
+        //         total_work, block_size,
+        //         [&](size_t idx, size_t start, size_t end) {
+        //             assert(start % 8 == 0);
+        //             assert(end % 8 == 0);
+        //             size_t rank_id_start = start / length;
+        //             size_t rank_id_end = (end - 1) / length;
+        //             // First rank
+        //             {
+        //                 size_t rank_id = rank_id_start;
+        //                 size_t offset = start % length;
+        //                 if (offset != 0) {
+        //                     uint8_t *buffers_local[MAX_NR_DPUS_PER_RANK];
+        //                     for (int i = 0; i < MAX_NR_DPUS_PER_RANK; i++) {
+        //                         uint8_t *target =
+        //                             buffers_alligned[rank_id *
+        //                                                  MAX_NR_DPUS_PER_RANK +
+        //                                              i];
+        //                         if (target == nullptr) {
+        //                             buffers_local[i] = nullptr;
+        //                         } else {
+        //                             buffers_local[i] = target + offset;
+        //                         }
+        //                     }
+        //                     ReceiveFromRank(
+        //                         buffers_local, symbol_offset + offset,
+        //                         base_addrs[rank_id], length - offset);
+        //                 } else {
+        //                     ReceiveFromRank(
+        //                         &buffers_alligned[rank_id *
+        //                                           MAX_NR_DPUS_PER_RANK],
+        //                         symbol_offset, base_addrs[rank_id], length);
+        //                 }
+        //             }
+        //             // Middle ranks
+        //             for (size_t rank_id = rank_id_start + 1;
+        //                  rank_id < rank_id_end; rank_id++) {
+        //                 ReceiveFromRank(
+        //                     &buffers_alligned[rank_id * MAX_NR_DPUS_PER_RANK],
+        //                     symbol_offset, base_addrs[rank_id], length);
+        //             }
+        //             // Last rank
+        //             if (rank_id_end > rank_id_start) {
+        //                 size_t rank_id = rank_id_end;
+        //                 size_t last_rank_len = end % length;
+        //                 ReceiveFromRank(
+        //                     &buffers_alligned[rank_id * MAX_NR_DPUS_PER_RANK],
+        //                     symbol_offset, base_addrs[rank_id], last_rank_len);
+        //             }
+        //         });
+        // };
     }
 
     void SendToPIM(uint8_t **buffers, std::string symbol_name,
@@ -329,14 +389,37 @@ class DirectPIMInterface : public PIMInterface {
 
         symbol_offset += GetSymbolOffset(symbol_name);
 
-        // Find physical address for each rank
-        for (uint32_t i = 0; i < nr_of_ranks; i++) {
-            dpu_lock_rank(ranks[i]);
-            DPU_ASSERT(dpu_switch_mux_for_rank_expr(ranks[i], true)); // 2us
-            SendToRank(&buffers[i * DPU_PER_RANK], symbol_offset, base_addrs[i],
-                       length, i);
-            dpu_unlock_rank(ranks[i]);
+        // Skip disabled PIM modules
+        uint8_t* buffers_alligned[MAX_NR_RANKS * MAX_NR_DPUS_PER_RANK];
+        {
+            uint32_t offset = 0;
+            for (uint32_t i = 0; i < nr_of_ranks; i++) {
+                for (int j = 0; j < MAX_NR_DPUS_PER_RANK; j++) {
+                    if (ranks[i]->dpus[j].enabled) {
+                        buffers_alligned[i * MAX_NR_DPUS_PER_RANK + j] = buffers[offset++];
+                    } else {
+                        buffers_alligned[i * MAX_NR_DPUS_PER_RANK + j] = nullptr;
+                    }
+                }
+            }
+            assert(offset == nr_of_dpus);
         }
+
+        parlay::parallel_for(0, nr_of_ranks, [&](size_t i) {
+            DPU_ASSERT(dpu_switch_mux_for_rank_expr(ranks[i], true));
+            SendToRank(&buffers_alligned[i * MAX_NR_DPUS_PER_RANK],
+                            symbol_offset, base_addrs[i], length, i);
+        }, 1, false);
+
+
+        // Find physical address for each rank
+        // for (uint32_t i = 0; i < nr_of_ranks; i++) {
+        //     dpu_lock_rank(ranks[i]);
+        //     DPU_ASSERT(dpu_switch_mux_for_rank_expr(ranks[i], true)); // 2us
+        //     SendToRank(&buffers[i * DPU_PER_RANK], symbol_offset, base_addrs[i],
+        //                length, i);
+        //     dpu_unlock_rank(ranks[i]);
+        // }
     }
 
     void allocate(uint32_t nr_of_ranks, std::string binary) {

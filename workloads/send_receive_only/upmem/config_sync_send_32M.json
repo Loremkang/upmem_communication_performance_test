@@ -1,0 +1,12 @@
+{
+    "interface_type" : "UPMEM",
+    "nr_ranks" : -1,
+    "nr_iters" : 1000,
+    "workload": [
+        {
+            "type" : "send",
+            "total_length" : 33554432,
+            "mode" : "sync"
+        }
+    ]
+}

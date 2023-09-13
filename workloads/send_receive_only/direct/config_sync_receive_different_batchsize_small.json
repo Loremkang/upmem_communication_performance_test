@@ -1,5 +1,5 @@
 {
-    "interface_type" : "UPMEM",
+    "interface_type" : "direct",
     "nr_ranks" : -1,
     "nr_iters" : 100,
     "workload": [
@@ -61,16 +61,6 @@
         {
             "type" : "receive",
             "total_length" : 16777216,
-            "mode" : "sync"
-        },
-        {
-            "type" : "receive",
-            "total_length" : 33554432,
-            "mode" : "sync"
-        },
-        {
-            "type" : "receive",
-            "total_length" : 67108864,
             "mode" : "sync"
         }
     ]

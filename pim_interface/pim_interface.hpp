@@ -8,6 +8,7 @@ extern "C" {
     #include <dpu.h>
 }
 
+const uint32_t MAX_NR_RANKS = 40;
 const uint32_t DPU_PER_RANK = 64;
 const uint64_t MRAM_SIZE = (64 << 20);
 

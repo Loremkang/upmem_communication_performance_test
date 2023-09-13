@@ -13,9 +13,9 @@ void fill() {
     __mram_ptr uint64_t* buffer = (__mram_ptr uint64_t*) DPU_MRAM_HEAP_POINTER;
     printf("%x\n", DPU_MRAM_HEAP_POINTER);
     printf("Hello World from %lld!\n", DPU_ID);
-    uint64_t offset = (DPU_ID << 32);
+    uint64_t offset = (DPU_ID << 48);
     for (int i = 0; i < BUFFERSIZE; i ++) {
-        buffer[i] = offset + (uint64_t)(&buffer[i]);
+        buffer[i] += offset + (uint64_t)(&buffer[i]);
         // haha[i] = buffer[i];
     }
     for (int i = 0; i < 2; i ++) {

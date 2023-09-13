@@ -1,9 +1,12 @@
 [submodule "argparse"]
-	path = argparse
+	path = third_party/argparse
 	url = https://github.com/p-ranav/argparse.git
 [submodule "json-parser"]
 	path = json-parser
 	url = https://github.com/json-parser/json-parser.git
 [submodule "json"]
-	path = json
+	path = third_party/json
 	url = https://github.com/nlohmann/json.git
+[submodule "parlaylib"]
+	path = third_party/parlaylib
+	url = https://github.com/cmuparlay/parlaylib
