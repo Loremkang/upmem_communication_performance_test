@@ -1,7 +1,7 @@
 {
     "interface_type" : "direct",
     "nr_ranks" : -1,
-    "nr_iters" : 1000,
+    "nr_iters" : 4000,
     "workload": [
         {
             "type" : "send",
