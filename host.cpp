@@ -160,6 +160,10 @@ auto runOneRound(auto &workload, uint8_t ***buffers, PIMInterface* interface) {
 
     for (int i = 0; i < workload_size; i++) {
         string type = workload[i]["type"];
+        string target;
+        if (workload[i].contains("target")) {
+            target = workload[i]["target"];
+        }
 
         // auto start_time = high_resolution_clock::now();
         auto start_time = get_timestamp();
@@ -169,30 +173,26 @@ auto runOneRound(auto &workload, uint8_t ***buffers, PIMInterface* interface) {
             bool async = (workload[i]["mode"] != "sync");
             // start_time = high_resolution_clock::now();
             start_time = get_timestamp();
-            interface->SendToPIM(buffers[i], DPU_MRAM_HEAP_POINTER_NAME, heapOffset + (4 << 20), bufferLength, async);
-            // DPU_FOREACH(dpu_set, dpu, each_dpu) {
-            //     DPU_ASSERT(dpu_prepare_xfer(dpu, buffers[i][each_dpu]));
-            // }
-            // auto sync_setup = (workload[i]["mode"] == "sync") ? DPU_XFER_DEFAULT
-            //                                                   : DPU_XFER_ASYNC;
-            // DPU_ASSERT(dpu_push_xfer(dpu_set, DPU_XFER_TO_DPU,
-            //                          DPU_MRAM_HEAP_POINTER_NAME, heapOffset,
-            //                          bufferLength, sync_setup));
+            if (target == "WRAM") {
+                // unimplemented
+                assert(false);
+            } else if (target == "MRAM") {
+                interface->SendToPIM(buffers[i], DPU_MRAM_HEAP_POINTER_NAME, heapOffset + (4 << 20), bufferLength, async);
+            } else {
+                assert(false);
+            }
         } else if (type == "receive") {
             int heapOffset = workload[i]["offset"];
             int bufferLength = workload[i]["buffer_length"];
             bool async = (workload[i]["mode"] != "sync");
-            // start_time = high_resolution_clock::now();
             start_time = get_timestamp();
-            interface->ReceiveFromPIM(buffers[i], DPU_MRAM_HEAP_POINTER_NAME, heapOffset + (4 << 20), bufferLength, async);
-            // DPU_FOREACH(dpu_set, dpu, each_dpu) {
-            //     DPU_ASSERT(dpu_prepare_xfer(dpu, buffers[i][each_dpu]));
-            // }
-            // auto sync_setup = (workload[i]["mode"] == "sync") ? DPU_XFER_DEFAULT
-            //                                                   : DPU_XFER_ASYNC;
-            // DPU_ASSERT(dpu_push_xfer(dpu_set, DPU_XFER_FROM_DPU,
-            //                          DPU_MRAM_HEAP_POINTER_NAME, heapOffset,
-            //                          bufferLength, sync_setup));
+            
+            if (target == "WRAM") {
+                assert(bufferLength < (10 << 10));
+                interface->ReceiveFromPIM(buffers[i], "wram_buffer", 0, bufferLength, async);
+            } else {
+                interface->ReceiveFromPIM(buffers[i], DPU_MRAM_HEAP_POINTER_NAME, heapOffset + (4 << 20), bufferLength, async);
+            }
         } else if (type == "sync") {
             interface->sync();
             // DPU_ASSERT(dpu_sync(dpu_set));
@@ -213,94 +213,187 @@ auto runOneRound(auto &workload, uint8_t ***buffers, PIMInterface* interface) {
     return timeSpent;
 }
 
+void InitDPUID(PIMInterface *interface) {
+    // assert(interface->nr_of_dpus == 256);
+    uint8_t **ids = new uint8_t *[interface->nr_of_dpus];
+    for (uint32_t i = 0; i < interface->nr_of_dpus; i++) {
+        ids[i] = new uint8_t[8];
+        uint64_t *addr = (uint64_t *)ids[i];
+        *addr = i;
+    }
 
-void experiments(PIMInterface* interface) {
+    interface->SendToPIMByUPMEM(ids, "DPU_ID", 0, sizeof(uint64_t), false);
+    
+    for (uint32_t i = 0; i < interface->nr_of_dpus; i ++) {
+        uint64_t *addr = (uint64_t *)ids[i];
+        *addr = 0;
+    }
+
+    interface->ReceiveFromPIMByUPMEM(ids, "DPU_ID", 0, sizeof(uint64_t),
+                                        false);
+
+    for (uint32_t i = 0; i < interface->nr_of_dpus; i++) {
+        uint64_t *addr = (uint64_t *)ids[i];
+        assert(*addr == i);
+    }
+
+    for (uint32_t i = 0; i < interface->nr_of_dpus; i++) {
+        uint64_t *addr = (uint64_t *)ids[i];
+        *addr = 0;
+    }
+
+    interface->SendToPIMByUPMEM(ids, "MRAM_TEST", 0, sizeof(uint64_t), false);
+    interface->SendToPIMByUPMEM(ids, "WRAM_TEST", 0, sizeof(uint64_t), false);
+
+    for (uint32_t i = 0; i < interface->nr_of_dpus; i ++) {
+        delete[] ids[i];
+    }
+    delete[] ids;
+}
+
+void MRAMReceiveValidation(PIMInterface *interface) {
+
     {
-        // assert(interface->nr_of_dpus == 256);
         uint8_t **ids = new uint8_t *[interface->nr_of_dpus];
         for (uint32_t i = 0; i < interface->nr_of_dpus; i++) {
             ids[i] = new uint8_t[8];
             uint64_t *addr = (uint64_t *)ids[i];
-            *addr = i;
+            *addr = 1;
         }
-
-        interface->SendToPIMByUPMEM(ids, "DPU_ID", 0, sizeof(uint64_t),
-                                       false);
-        interface->ReceiveFromPIMByUPMEM(ids, "DPU_ID", 0,
-        sizeof(uint64_t), false);
-
-        for (uint32_t i = 0; i < interface->nr_of_dpus; i++) {
-            uint64_t* addr = (uint64_t*)ids[i];
-            assert(*addr == i);
+        interface->SendToPIMByUPMEM(ids, "MRAM_TEST", 0, sizeof(uint64_t), false);
+        for (uint32_t i = 0; i < interface->nr_of_dpus; i ++) {
             delete[] ids[i];
         }
         delete[] ids;
     }
 
+    uint32_t COUNT = 1024 * 1024;               // 1M
+    uint32_t SIZE = COUNT * sizeof(uint64_t);   // 1MB
+
     {
-        uint32_t COUNT = 1024 * 1024;
-        uint32_t SIZE = COUNT * sizeof(uint64_t);
         // assert(interface->nr_of_dpus == 256);
         uint8_t **ids = new uint8_t *[interface->nr_of_dpus];
         parlay::parallel_for(0, interface->nr_of_dpus, [&](size_t i) {
             ids[i] = new uint8_t[SIZE];
             uint64_t *addr = (uint64_t *)ids[i];
-            for (uint32_t k = 0; k < COUNT; k ++) {
+            for (uint32_t k = 0; k < COUNT; k++) {
                 addr[k] = parlay::hash64(k) * i;
             }
         });
 
-        interface->SendToPIMByUPMEM(ids, DPU_MRAM_HEAP_POINTER_NAME, 10485760, SIZE,
-                                       false);
+        interface->SendToPIMByUPMEM(ids, DPU_MRAM_HEAP_POINTER_NAME, 10485760,
+                                    SIZE, false);
         for (uint32_t i = 0; i < interface->nr_of_dpus; i++) {
             delete[] ids[i];
         }
         delete[] ids;
     }
 
+    interface->Launch(false);
+    interface->PrintLog();
 
     {
-        uint32_t COUNT = 1024 * 1024;
-        uint32_t SIZE = COUNT * sizeof(uint64_t);
-
-        interface->Launch(false);
-
-        interface->PrintLog();
-
-        {
-            uint8_t **buffers = new uint8_t *[interface->nr_of_dpus];
-            parlay::parallel_for(0, interface->nr_of_dpus, [&](size_t i) {
-                buffers[i] = new uint8_t[SIZE];
-            });
-            interface->ReceiveFromPIM(buffers, DPU_MRAM_HEAP_POINTER_NAME,
-                                         10485760, SIZE, false);
-            // interface->ReceiveFromPIMByUPMEM(buffers, DPU_MRAM_HEAP_POINTER_NAME,
-            //                              10485760, SIZE, false);
-            parlay::parallel_for(0, interface->nr_of_dpus, [&](size_t i) {
-                uint64_t *addr = (uint64_t *)buffers[i];
-                for (uint32_t k = 0; k < COUNT; k ++) {
-                    uint64_t val = ((uint64_t)i << 48) + 11ll * 1024 * 1024 + k * 8 + parlay::hash64(k) * i;
-                    assert(addr[k] == val);
-                    if (k < 2) {
-                        printf("buffers[%d][%d]=%16llx\n", i, k, addr[k]);
-                    }
+        uint8_t **buffers = new uint8_t *[interface->nr_of_dpus];
+        parlay::parallel_for(0, interface->nr_of_dpus, [&](size_t i) {
+            buffers[i] = new uint8_t[SIZE];
+        });
+        interface->ReceiveFromPIM(buffers, DPU_MRAM_HEAP_POINTER_NAME,
+                                    10485760, SIZE, false);
+        parlay::parallel_for(0, interface->nr_of_dpus, [&](size_t i) {
+            uint64_t *addr = (uint64_t *)buffers[i];
+            for (uint32_t k = 0; k < COUNT; k++) {
+                uint64_t val = ((uint64_t)i << 48) + 11ll * 1024 * 1024 +
+                                k * 8 + parlay::hash64(k) * i;
+                assert(addr[k] == val);
+                if (k < 2) {
+                    printf("buffers[%d][%d]=%16llx\n", i, k, addr[k]);
                 }
-            });
-            // for (uint32_t i = 0; i < interface->nr_of_dpus; i++) {
-            //     uint64_t *head = (uint64_t *)buffers[i];
-            //     for (uint32_t j = 0; j < COUNT; j++) {
-            //         printf("buffers[%d][%d]=%16llx\n", i, j, head[j]);
-            //         uint64_t val = ((uint64_t)i << 32) + 10485760 + 1048576 + j * 8;
-            //         // assert(head[j] == val);
-            //     }
-            //     printf("\n");
-            // }
-            for (uint32_t i = 0; i < interface->nr_of_dpus; i++) {
-                delete[] buffers[i];
             }
-            delete[] buffers;
+        });
+        for (uint32_t i = 0; i < interface->nr_of_dpus; i++) {
+            delete[] buffers[i];
         }
+        delete[] buffers;
     }
+}
+
+void WRAMReceiveValidation(PIMInterface *interface) {
+    uint8_t **ids = new uint8_t *[interface->nr_of_dpus];
+    for (uint32_t i = 0; i < interface->nr_of_dpus; i++) {
+        ids[i] = new uint8_t[8];
+        uint64_t *addr = (uint64_t *)ids[i];
+        *addr = 1;
+    }
+    interface->SendToPIMByUPMEM(ids, "WRAM_TEST", 0, sizeof(uint64_t), false);
+    for (uint32_t i = 0; i < interface->nr_of_dpus; i ++) {
+        delete[] ids[i];
+    }
+    delete[] ids;
+
+    uint32_t SIZE = 10 << 10;                   // 10 KB
+    uint32_t COUNT = SIZE / sizeof(uint64_t);   // 1.25 K
+
+    {
+        // assert(interface->nr_of_dpus == 256);
+        uint8_t **ids = new uint8_t *[interface->nr_of_dpus];
+        parlay::parallel_for(0, interface->nr_of_dpus, [&](size_t i) {
+            ids[i] = new uint8_t[SIZE];
+            uint64_t *addr = (uint64_t *)ids[i];
+            for (uint32_t k = 0; k < COUNT; k++) {
+                addr[k] = i;
+            }
+        });
+
+        interface->SendToPIMByUPMEM(ids, "wram_buffer", 0,
+                                    SIZE, false);
+                                    
+        for (uint32_t i = 0; i < interface->nr_of_dpus; i++) {
+            delete[] ids[i];
+        }
+        delete[] ids;
+    }
+
+    interface->Launch(false);
+    interface->PrintLog();
+
+    {
+        uint8_t **buffers = new uint8_t *[interface->nr_of_dpus];
+        parlay::parallel_for(0, interface->nr_of_dpus, [&](size_t i) {
+            buffers[i] = new uint8_t[SIZE];
+        });
+        DirectPIMInterface* di = (DirectPIMInterface*)interface;
+        di->ReceiveFromPIM(buffers, "wram_buffer",
+                                    0, SIZE, false);
+        auto f = [&](size_t i) {
+            uint64_t *addr = (uint64_t *)buffers[i];
+            for (uint32_t k = 0; k < COUNT; k++) {
+                uint64_t val = ((uint64_t)i << 48) + 0x220 +
+                                k * 8 + i;
+                if(!(addr[k] == val)) {
+                    printf("buffers[%d][%d]=%16llx, val=%16llx\n", i, k, addr[k], val);
+                    fflush(stdout);
+                    assert(false);
+                }
+                if (k < 2) {
+                    printf("buffers[%d][%d]=%16llx\n", i, k, addr[k]);
+                }
+            }
+        };
+        for (int i = 0; i < interface->nr_of_dpus; i ++) {
+            f(i);
+        }
+        // parlay::parallel_for(0, interface->nr_of_dpus, f);
+        for (uint32_t i = 0; i < interface->nr_of_dpus; i++) {
+            delete[] buffers[i];
+        }
+        delete[] buffers;
+    }
+}
+
+void experiments(PIMInterface *interface) {
+    InitDPUID(interface);
+    // MRAMReceiveValidation(interface);
+    WRAMReceiveValidation(interface);
 }
 
 int main(int argc, char *argv[]) {
@@ -348,8 +441,10 @@ int main(int argc, char *argv[]) {
         cout << (totalTimeSpent[i] / nr_iters) << endl;
         config["workload"][i]["latency"] = (totalTimeSpent[i] / nr_iters);
         uint64_t buf_len = config["workload"][i]["buffer_length"];
-        uint64_t communication = buf_len * pimInterface->nr_of_ranks * MAX_NR_DPUS_PER_RANK;
-        config["workload"][i]["bandwidth"] = communication / (totalTimeSpent[i] / nr_iters) / 1e9;
+        uint64_t communication =
+            buf_len * pimInterface->nr_of_ranks * MAX_NR_DPUS_PER_RANK;
+        config["workload"][i]["bandwidth"] =
+            communication / (totalTimeSpent[i] / nr_iters) / 1e9;
     }
 
     config["average_time"] =

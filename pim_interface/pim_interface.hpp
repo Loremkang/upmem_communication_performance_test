@@ -6,6 +6,7 @@
 
 extern "C" {
     #include <dpu.h>
+    #include <dpu_rank.h>
 }
 
 const uint32_t MAX_NR_RANKS = 40;
