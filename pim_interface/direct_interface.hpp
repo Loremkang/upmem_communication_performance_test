@@ -41,6 +41,13 @@ typedef struct _hw_dpu_rank_allocation_parameters_t {
     fpga_allocation_parameters_t fpga;
 } *hw_dpu_rank_allocation_parameters_t;
 
+dpu_error_t ci_poll_rank(struct dpu_rank_t *rank, dpu_bitfield_t *run,
+			 dpu_bitfield_t *fault);
+
+void polling_thread_set_dpu_running(uint32_t idx);
+
+dpu_error_t dpu_sync_rank(struct dpu_rank_t *rank);
+
 #define DPU_REGION_MODE_UNDEFINED 0
 #define DPU_REGION_MODE_PERF 1
 #define DPU_REGION_MODE_SAFE 2
@@ -65,6 +72,36 @@ class DirectPIMInterface : public PIMInterface {
     inline bool aligned(uint64_t offset, uint64_t factor) {
         return (offset % factor == 0);
     }
+
+    // not modifying Launch currently because the default "error handling" seems to be useful.
+    void Launch(bool async) {
+        auto async_parameter = async ? DPU_ASYNCHRONOUS : DPU_SYNCHRONOUS;
+        DPU_ASSERT(dpu_launch(dpu_set, async_parameter));
+    }
+    // void Launch(bool async) {
+    //     assert(!async);
+    //     // dpu_error_t status = DPU_OK;
+    //     printf("boot\n");
+    //     fflush(stdout);
+    //     dpu_boot_rank(ranks[0]);
+    //     double t = internal_timer::get_timestamp();
+    //     dpu_bitfield_t dpu_poll_running[DPU_MAX_NR_CIS];
+    //     dpu_bitfield_t dpu_poll_in_fault[DPU_MAX_NR_CIS];
+    //     while (true) {
+    //         usleep(10000);
+    //         ci_poll_rank(ranks[0], dpu_poll_running, dpu_poll_in_fault);
+    //         uint64_t* r1 = (uint64_t*)dpu_poll_running;
+    //         uint64_t* r2 = (uint64_t*)dpu_poll_in_fault;
+    //         printf("%llx\t%llx\n", *r1, *r2);
+    //         fflush(stdout);
+    //         double t2 = internal_timer::get_timestamp();
+    //         if (t2 - t > 1.0) {
+    //             return;
+    //         }
+    //     }
+    //     polling_thread_set_dpu_running(ranks[0]->api.thread_info.queue_idx);
+    //     dpu_sync_rank(ranks[0]);
+    // }
 
     // inline uint64_t get_correct_offset_fast(uint64_t address_offset, uint32_t dpu_id) {
     //     uint64_t mask_move_7 = (~((1 << 22) - 1)) + (1 << 13); // 31..22, 13

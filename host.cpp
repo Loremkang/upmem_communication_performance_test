@@ -245,6 +245,8 @@ void InitDPUID(PIMInterface *interface) {
     interface->SendToPIMByUPMEM(ids, "MRAM_TEST", 0, sizeof(uint64_t), false);
     interface->SendToPIMByUPMEM(ids, "WRAM_TEST", 0, sizeof(uint64_t), false);
 
+    interface->Launch(false);
+    cout<<"LAUNCH SUCCEED"<<endl;
     for (uint32_t i = 0; i < interface->nr_of_dpus; i ++) {
         delete[] ids[i];
     }
@@ -353,8 +355,12 @@ void WRAMReceiveValidation(PIMInterface *interface) {
         delete[] ids;
     }
 
+    internal_timer t;
+    t.start();
     interface->Launch(false);
-    interface->PrintLog();
+    t.end();
+    t.print();
+    // interface->PrintLog();
 
     {
         uint8_t **buffers = new uint8_t *[interface->nr_of_dpus];
@@ -375,7 +381,7 @@ void WRAMReceiveValidation(PIMInterface *interface) {
                     assert(false);
                 }
                 if (k < 2) {
-                    printf("buffers[%d][%d]=%16llx\n", i, k, addr[k]);
+                    // printf("buffers[%d][%d]=%16llx\n", i, k, addr[k]);
                 }
             }
         };
@@ -393,7 +399,7 @@ void WRAMReceiveValidation(PIMInterface *interface) {
 void experiments(PIMInterface *interface) {
     InitDPUID(interface);
     // MRAMReceiveValidation(interface);
-    WRAMReceiveValidation(interface);
+    // WRAMReceiveValidation(interface);
 }
 
 int main(int argc, char *argv[]) {
@@ -406,8 +412,10 @@ int main(int argc, char *argv[]) {
     PIMInterface *pimInterface = nullptr;
     if (config["interface_type"] == "direct") {
         pimInterface = new DirectPIMInterface();
+        cout<<"Direct Interface"<<endl;
     } else if (config["interface_type"] == "UPMEM") {
         pimInterface = new UPMEMInterface();
+        cout<<"UPMEM Interface"<<endl;
         // assert(false);
     }
     // printf("%016llx\n", pimInterface->get_correct_offset(0x12345678, 0));
@@ -415,8 +423,8 @@ int main(int argc, char *argv[]) {
     assert(pimInterface != nullptr);
     pimInterface->allocate(config["nr_ranks"], DPU_BINARY);
 
-    // experiments(pimInterface);
-    // exit(0);
+    experiments(pimInterface);
+    exit(0);
 
     auto &workload = config["workload"];
     int workload_size = workload.size();

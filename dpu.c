@@ -55,5 +55,7 @@ int main() {
     if (WRAM_TEST) {
         wram_test();
     }
+    // for (int i = 0; i < 1e5; i ++) { // about 100ms
+    // }
     return 0;
 }
