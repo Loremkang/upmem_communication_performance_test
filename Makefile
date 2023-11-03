@@ -5,7 +5,7 @@ CCFLAGS = -Wall -Wextra -O3 `dpu-pkg-config --cflags --libs dpu` -std=c++17 -mar
 CCDPU = dpu-upmem-dpurte-clang
 
 .PHONY: all debug clean
-all: host dpu
+all: host dpu upmem_direct_c.o
 
 debug: CCFLAGS += -DXFER_BACK
 # debug: CCFLAGS += -g -DXFER_BACK
@@ -16,6 +16,9 @@ host: host.cpp pim_interface
 
 dpu: dpu.c
 	$(CCDPU) -o dpu dpu.c
+
+upmem_direct_c.o: upmem_direct_c.c upmem_direct_c.h
+	$(CC) -o $@ -c upmem_direct_c.c upmem_direct_c.h  $(INCLUDE_LIBS) $(INCLUDE_THIRD_PARTY) $(CCFLAGS)
 
 clean:
 	rm -f host dpu
