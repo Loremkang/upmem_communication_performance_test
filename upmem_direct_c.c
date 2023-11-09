@@ -32,7 +32,7 @@ extern "C" {
   }
   void SendToPIM(XDPI self, uint8_t** buffers, char* symbol_name, uint32_t symbol_offset, uint32_t length, bool async) {
     std::string symbol_name2 = std::string(symbol_name);
-    cast_to_cpp(self)->SendToPIM(buffers, symbol_name2, symbol_offset, length, sync);
+    cast_to_cpp(self)->SendToPIM(buffers, symbol_name2, symbol_offset, length, async);
   }
   
   void ReceiveFromPIM(XDPI self, uint8_t** buffers, char* symbol_name, uint32_t symbol_offset, uint32_t length, bool async) {
