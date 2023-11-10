@@ -13,6 +13,7 @@ extern "C" {
 #include <dpu_rank.h>
 #include <dpu_target_macros.h>
 #include <dpu_types.h>
+#include <dpu_internals.h>
 
 #include "dpu_region_address_translation.h"
 #include "hw_dpu_sysfs.h"
@@ -40,6 +41,13 @@ typedef struct _hw_dpu_rank_allocation_parameters_t {
     fpga_allocation_parameters_t fpga;
 } *hw_dpu_rank_allocation_parameters_t;
 
+dpu_error_t ci_poll_rank(struct dpu_rank_t *rank, dpu_bitfield_t *run,
+			 dpu_bitfield_t *fault);
+
+void polling_thread_set_dpu_running(uint32_t idx);
+
+dpu_error_t dpu_sync_rank(struct dpu_rank_t *rank);
+
 #define DPU_REGION_MODE_UNDEFINED 0
 #define DPU_REGION_MODE_PERF 1
 #define DPU_REGION_MODE_SAFE 2
@@ -52,6 +60,8 @@ typedef struct _hw_dpu_rank_allocation_parameters_t {
 
 class DirectPIMInterface : public PIMInterface {
    public:
+    internal_timer t;
+
     DirectPIMInterface() : PIMInterface() {
         ranks = nullptr;
         params = nullptr;
@@ -63,86 +73,124 @@ class DirectPIMInterface : public PIMInterface {
         return (offset % factor == 0);
     }
 
-    inline uint64_t get_correct_offset_fast(uint64_t address_offset, uint32_t dpu_id) {
-        uint64_t mask_move_7 = (~((1 << 22) - 1)) + (1 << 13); // 31..22, 13
-        uint64_t mask_move_6 = ((1 << 22) - (1 << 15)); // 21..15
-        uint64_t mask_move_14 = (1 << 14); // 14
-        uint64_t mask_move_4 = (1 << 13) - 1; // 12 .. 0
-        return ((address_offset & mask_move_7) << 7) | ((address_offset & mask_move_6) << 6) | ((address_offset & mask_move_14) << 14) | ((address_offset & mask_move_4) << 4) | (dpu_id << 18);
+    // not modifying Launch currently because the default "error handling" seems to be useful.
+    void Launch(bool async) {
+        auto async_parameter = async ? DPU_ASYNCHRONOUS : DPU_SYNCHRONOUS;
+        DPU_ASSERT(dpu_launch(dpu_set, async_parameter));
     }
+    // void Launch(bool async) {
+    //     assert(!async);
+    //     // dpu_error_t status = DPU_OK;
+    //     printf("boot\n");
+    //     fflush(stdout);
+    //     dpu_boot_rank(ranks[0]);
+    //     double t = internal_timer::get_timestamp();
+    //     dpu_bitfield_t dpu_poll_running[DPU_MAX_NR_CIS];
+    //     dpu_bitfield_t dpu_poll_in_fault[DPU_MAX_NR_CIS];
+    //     while (true) {
+    //         usleep(10000);
+    //         ci_poll_rank(ranks[0], dpu_poll_running, dpu_poll_in_fault);
+    //         uint64_t* r1 = (uint64_t*)dpu_poll_running;
+    //         uint64_t* r2 = (uint64_t*)dpu_poll_in_fault;
+    //         printf("%llx\t%llx\n", *r1, *r2);
+    //         fflush(stdout);
+    //         double t2 = internal_timer::get_timestamp();
+    //         if (t2 - t > 1.0) {
+    //             return;
+    //         }
+    //     }
+    //     polling_thread_set_dpu_running(ranks[0]->api.thread_info.queue_idx);
+    //     dpu_sync_rank(ranks[0]);
+    // }
 
-    inline uint64_t get_correct_offset_golden(uint64_t address_offset, uint32_t dpu_id) {
-        // uint64_t fastoffset = get_correct_offset_fast(address_offset, dpu_id);
-        uint64_t offset = 0;
+    // inline uint64_t get_correct_offset_fast(uint64_t address_offset, uint32_t dpu_id) {
+    //     uint64_t mask_move_7 = (~((1 << 22) - 1)) + (1 << 13); // 31..22, 13
+    //     uint64_t mask_move_6 = ((1 << 22) - (1 << 15)); // 21..15
+    //     uint64_t mask_move_14 = (1 << 14); // 14
+    //     uint64_t mask_move_4 = (1 << 13) - 1; // 12 .. 0
+    //     return ((address_offset & mask_move_7) << 7) | ((address_offset & mask_move_6) << 6) | ((address_offset & mask_move_14) << 14) | ((address_offset & mask_move_4) << 4) | (dpu_id << 18);
+    // }
 
-        // 1 : address_offset < 64MB
-        offset += (512ll << 20) * (address_offset >> 22);
-        address_offset &= (1ll << 22) - 1;
+    // inline uint64_t get_correct_offset_golden(uint64_t address_offset, uint32_t dpu_id) {
+    //     // uint64_t fastoffset = get_correct_offset_fast(address_offset, dpu_id);
+    //     uint64_t offset = 0;
+    //     // 1 : address_offset < 64MB
+    //     offset += (512ll << 20) * (address_offset >> 22);
+    //     address_offset &= (1ll << 22) - 1;
+    //     // 2 : address_offset < 4MB
+    //     if (address_offset & (16 << 10)) {
+    //         offset += (256ll << 20);
+    //     }
+    //     offset += (2ll << 20) * (address_offset / (32 << 10));
+    //     address_offset %= (16 << 10);
+    //     // 3 : address_offset < 16K
+    //     if (address_offset & (8 << 10)) {
+    //         offset += (1ll << 20);
+    //     }
+    //     address_offset %= (8 << 10);
+    //     offset += address_offset * 16;
+    //     // 4 : address_offset < 8K
+    //     offset += (dpu_id & 3) * (256 << 10);
+    //     // 5
+    //     if (dpu_id >= 4) {
+    //         offset += 64;
+    //     }
+    //     return offset;
+    // }
 
-        // 2 : address_offset < 4MB
-        if (address_offset & (16 << 10)) {
-            offset += (256ll << 20);
-        }
-        offset += (2ll << 20) * (address_offset / (32 << 10));
-        address_offset %= (16 << 10);
+    inline uint64_t GetCorrectOffsetMRAM(uint64_t address_offset, uint32_t dpu_id) {
+        auto FastPath = [](uint64_t address_offset, uint32_t dpu_id) {
+            uint64_t mask_move_7 = (~((1 << 22) - 1)) + (1 << 13); // 31..22, 13
+            uint64_t mask_move_6 = ((1 << 22) - (1 << 15)); // 21..15
+            uint64_t mask_move_14 = (1 << 14); // 14
+            uint64_t mask_move_4 = (1 << 13) - 1; // 12 .. 0
+            return ((address_offset & mask_move_7) << 7) | ((address_offset & mask_move_6) << 6) | ((address_offset & mask_move_14) << 14) | ((address_offset & mask_move_4) << 4) | (dpu_id << 18);
+        };
 
-        // 3 : address_offset < 16K
-        if (address_offset & (8 << 10)) {
-            offset += (1ll << 20);
-        }
-        address_offset %= (8 << 10);
-        
-        offset += address_offset * 16;
+        auto OraclePath = [](uint64_t address_offset, uint32_t dpu_id) {
+            // uint64_t fastoffset = get_correct_offset_fast(address_offset, dpu_id);
+            uint64_t offset = 0;
 
-        // 4 : address_offset < 8K
-        offset += (dpu_id & 3) * (256 << 10);
+            // 1 : address_offset < 64MB
+            offset += (512ll << 20) * (address_offset >> 22);
+            address_offset &= (1ll << 22) - 1;
 
-        // 5
-        if (dpu_id >= 4) {
-            offset += 64;
-        }
+            // 2 : address_offset < 4MB
+            if (address_offset & (16 << 10)) {
+                offset += (256ll << 20);
+            }
+            offset += (2ll << 20) * (address_offset / (32 << 10));
+            address_offset %= (16 << 10);
 
-        return offset;
-    }
+            // 3 : address_offset < 16K
+            if (address_offset & (8 << 10)) {
+                offset += (1ll << 20);
+            }
+            address_offset %= (8 << 10);
+            
+            offset += address_offset * 16;
 
-    inline uint64_t get_correct_offset(uint64_t address_offset, uint32_t dpu_id) {
-        // uint64_t v1 = get_correct_offset_golden(address_offset, dpu_id);
-        // uint64_t v2 = get_correct_offset_fast(address_offset, dpu_id);
+            // 4 : address_offset < 8K
+            offset += (dpu_id & 3) * (256 << 10);
+
+            // 5
+            if (dpu_id >= 4) {
+                offset += 64;
+            }
+
+            return offset;
+        };
+
+        // uint64_t v1 = FastPath(address_offset, dpu_id);
+        // uint64_t v2 = OraclePath(address_offset, dpu_id);
         // assert(v1 == v2);
-        // return v2;
-        return get_correct_offset_fast(address_offset, dpu_id);
+        // return v1;
+
+        return FastPath(address_offset, dpu_id);
     }
 
-    void LoadData(uint64_t* cache_line, uint8_t* ptr_dest) {
-        // printf("%016llx - %016llx\n", ptr_dest + offset, ptr_dest + offset + 0x40);
-        // memcpy(cache_line, ptr_dest, sizeof(uint64_t) * 8);
-        cache_line[0] =
-            *((volatile uint64_t *)((uint8_t *)ptr_dest +
-                                    0 * sizeof(uint64_t)));
-        cache_line[1] =
-            *((volatile uint64_t *)((uint8_t *)ptr_dest +
-                                    1 * sizeof(uint64_t)));
-        cache_line[2] =
-            *((volatile uint64_t *)((uint8_t *)ptr_dest +
-                                    2 * sizeof(uint64_t)));
-        cache_line[3] =
-            *((volatile uint64_t *)((uint8_t *)ptr_dest +
-                                    3 * sizeof(uint64_t)));
-        cache_line[4] =
-            *((volatile uint64_t *)((uint8_t *)ptr_dest +
-                                    4 * sizeof(uint64_t)));
-        cache_line[5] =
-            *((volatile uint64_t *)((uint8_t *)ptr_dest +
-                                    5 * sizeof(uint64_t)));
-        cache_line[6] =
-            *((volatile uint64_t *)((uint8_t *)ptr_dest +
-                                    6 * sizeof(uint64_t)));
-        cache_line[7] =
-            *((volatile uint64_t *)((uint8_t *)ptr_dest +
-                                    7 * sizeof(uint64_t)));
-    }
-
-    void ReceiveFromRank(uint8_t **buffers, uint32_t symbol_offset,
+    //buffers[64][length]
+    void ReceiveFromRankMRAM(uint8_t **buffers, uint32_t symbol_offset,
                          uint8_t *ptr_dest, uint32_t length) {
         assert(aligned(symbol_offset, sizeof(uint64_t)));
         assert(aligned(length, sizeof(uint64_t)));
@@ -153,13 +201,42 @@ class DirectPIMInterface : public PIMInterface {
         for (uint32_t dpu_id = 0; dpu_id < 4; ++dpu_id) {
             for (uint32_t i = 0; i < length / sizeof(uint64_t); ++i) {
                 // 8 shards of DPUs
-                uint64_t offset = get_correct_offset(symbol_offset + (i * 8), dpu_id);
+                uint64_t offset = GetCorrectOffsetMRAM(symbol_offset + (i * 8), dpu_id);
                 __builtin_ia32_clflushopt((void *)(ptr_dest + offset));
                 offset += 0x40;
                 __builtin_ia32_clflushopt((void *)(ptr_dest + offset));
             }
         }
         __builtin_ia32_mfence();
+
+        auto LoadData = [](uint64_t* cache_line, uint8_t* ptr_dest) {
+            // printf("%016llx - %016llx\n", ptr_dest + offset, ptr_dest + offset + 0x40);
+            // memcpy(cache_line, ptr_dest, sizeof(uint64_t) * 8);
+            cache_line[0] =
+                *((volatile uint64_t *)((uint8_t *)ptr_dest +
+                                        0 * sizeof(uint64_t)));
+            cache_line[1] =
+                *((volatile uint64_t *)((uint8_t *)ptr_dest +
+                                        1 * sizeof(uint64_t)));
+            cache_line[2] =
+                *((volatile uint64_t *)((uint8_t *)ptr_dest +
+                                        2 * sizeof(uint64_t)));
+            cache_line[3] =
+                *((volatile uint64_t *)((uint8_t *)ptr_dest +
+                                        3 * sizeof(uint64_t)));
+            cache_line[4] =
+                *((volatile uint64_t *)((uint8_t *)ptr_dest +
+                                        4 * sizeof(uint64_t)));
+            cache_line[5] =
+                *((volatile uint64_t *)((uint8_t *)ptr_dest +
+                                        5 * sizeof(uint64_t)));
+            cache_line[6] =
+                *((volatile uint64_t *)((uint8_t *)ptr_dest +
+                                        6 * sizeof(uint64_t)));
+            cache_line[7] =
+                *((volatile uint64_t *)((uint8_t *)ptr_dest +
+                                        7 * sizeof(uint64_t)));
+        };
 
         for (uint32_t dpu_id = 0; dpu_id < 4; ++dpu_id) {
             for (uint32_t i = 0; i < length / sizeof(uint64_t); ++i) {
@@ -168,7 +245,7 @@ class DirectPIMInterface : public PIMInterface {
                         __builtin_prefetch(((uint64_t *)buffers[j * 4 + dpu_id]) + i + 8);
                     }
                 }
-                uint64_t offset = get_correct_offset(symbol_offset + (i * 8), dpu_id);
+                uint64_t offset = GetCorrectOffsetMRAM(symbol_offset + (i * 8), dpu_id);
                 __builtin_prefetch(ptr_dest + offset + 0x40 * 6);
                 __builtin_prefetch(ptr_dest + offset + 0x40 * 7);
 
@@ -194,18 +271,8 @@ class DirectPIMInterface : public PIMInterface {
         }
     }
 
-    bool ValidAddress(uint8_t* address, int id) {
-        bool ok = true;
-        // if (!(address >= base_addrs[id] + (512ull << 20))) {
-        //     ok = false;
-        // }
-        if (!((address + 128) <= base_addrs[id] + (8ull << 30))) {
-            ok = false;
-        }
-        return ok;
-    }
-
-    void SendToRank(uint8_t **buffers, uint32_t symbol_offset,
+    //buffers[64][length]
+    void SendToRankMRAM(uint8_t **buffers, uint32_t symbol_offset,
                          uint8_t *ptr_dest, uint32_t length, int id) {
         assert(aligned(symbol_offset, sizeof(uint64_t)));
         assert(aligned(length, sizeof(uint64_t)));
@@ -220,7 +287,18 @@ class DirectPIMInterface : public PIMInterface {
                         __builtin_prefetch(((uint64_t *)buffers[j * 4 + dpu_id]) + i + 8);
                     }
                 }
-                uint64_t offset = get_correct_offset(symbol_offset + (i * 8), dpu_id);
+                uint64_t offset = GetCorrectOffsetMRAM(symbol_offset + (i * 8), dpu_id);
+
+                auto ValidAddress = [&](uint8_t* address, int id) {
+                    bool ok = true;
+                    // if (!(address >= base_addrs[id] + (512ull << 20))) {
+                    //     ok = false;
+                    // }
+                    if (!((address + 128) <= base_addrs[id] + (8ull << 30))) {
+                        ok = false;
+                    }
+                    return ok;
+                };
 
                 if (!ValidAddress(ptr_dest + offset, id)) {
                     printf("symbol_offset=%16llx\n", symbol_offset);
@@ -259,10 +337,6 @@ class DirectPIMInterface : public PIMInterface {
         (void)buffers;
         (void)symbol_offset;
         (void)length;
-        // Only support heap pointer at present
-        if (!(symbol_name == DPU_MRAM_HEAP_POINTER_NAME)) {
-            return false;
-        }
 
         // Only suport synchronous transfer
         if (async_transfer) {
@@ -278,51 +352,110 @@ class DirectPIMInterface : public PIMInterface {
         return true;
     }
 
-    // Find heap pointer address offset
+    // Find symbol address offset
     uint32_t GetSymbolOffset(std::string symbol_name) {
-        // Find heap pointer address offset
-        assert(symbol_name == DPU_MRAM_HEAP_POINTER_NAME);
         dpu_symbol_t symbol;
         DPU_ASSERT(
-            dpu_get_symbol(program, DPU_MRAM_HEAP_POINTER_NAME, &symbol));
-        assert(symbol.address &
-               MRAM_ADDRESS_SPACE);  // should be a MRAM address
-        return symbol.address ^ MRAM_ADDRESS_SPACE;
+            dpu_get_symbol(program, symbol_name.c_str(), &symbol));
+        return symbol.address;
     }
 
-    internal_timer t;
-
-    void ReceiveFromPIM(uint8_t **buffers, std::string symbol_name,
-                        uint32_t symbol_offset, uint32_t length,
-                        bool async_transfer) {
-        // Please make sure buffers don't overflow
-        assert(DirectAvailable(buffers, symbol_name, symbol_offset, length,
-                               async_transfer));
-
-        symbol_offset += GetSymbolOffset(symbol_name);
-        // printf("Symbol Offset = %llx\n", symbol_offset);
-
-        // Skip disabled PIM modules
-        uint8_t* buffers_alligned[MAX_NR_RANKS * MAX_NR_DPUS_PER_RANK];
-        {
-            uint32_t offset = 0;
-            for (uint32_t i = 0; i < nr_of_ranks; i++) {
-                for (int j = 0; j < MAX_NR_DPUS_PER_RANK; j++) {
-                    if (ranks[i]->dpus[j].enabled) {
-                        buffers_alligned[i * MAX_NR_DPUS_PER_RANK + j] = buffers[offset++];
-                    } else {
-                        buffers_alligned[i * MAX_NR_DPUS_PER_RANK + j] = nullptr;
-                    }
-                }
-            }
-            assert(offset == nr_of_dpus);
+    void ReceiveFromRankWRAM(uint8_t **buffers, uint32_t wram_word_offset,
+                             uint32_t nb_of_words, dpu_rank_t *rank) {
+        // LOG_RANK(DEBUG, rank, "%p, %u, %u", transfer_matrix, wram_word_offset, nb_of_words);
+        if (nb_of_words == 0) {
+            return;
         }
 
-        parlay::parallel_for(0, nr_of_ranks, [&](size_t i) {
+        auto verify = [](uint32_t wram_word_offset, uint32_t nb_of_words, dpu_rank_t *rank) {
+            verify_wram_access(wram_word_offset, nb_of_words, rank);
+            return DPU_OK;
+        };
+
+        if (!(verify(wram_word_offset, nb_of_words, rank) == DPU_OK)) {
+            printf("ERROR: invalid wram access ((%d >= %d) || (%d > %d))",                                                          \
+                wram_word_offset,                                                                                                               \
+                (rank)->description->hw.memories.wram_size,                                                                         \
+                (wram_word_offset) + (nb_of_words),                                                                                                       \
+                (rank)->description->hw.memories.wram_size);
+                fflush(stdout);
+            assert(false);
+        }
+
+        uint8_t nr_cis =
+            rank->description->hw.topology.nr_of_control_interfaces;
+        uint8_t nr_dpus_per_ci =
+            rank->description->hw.topology.nr_of_dpus_per_control_interface;
+        dpu_error_t status;
+
+        dpuword_t *wram_array[DPU_MAX_NR_CIS] = { 0 };
+        dpu_member_id_t each_dpu;
+
+        for (each_dpu = 0; each_dpu < nr_dpus_per_ci; ++each_dpu) {
+            dpu_slice_id_t each_ci;
+            uint8_t mask = 0;
+
+            for (each_ci = 0; each_ci < nr_cis; ++each_ci) {
+                dpuword_t *dst =
+                    (dpuword_t *)
+                        buffers[get_transfer_matrix_index(
+                            rank, each_dpu, each_ci)]; // reversed here
+
+                if (dst != NULL) {
+                    wram_array[each_ci] = dst;
+                    mask |= CI_MASK_ONE(each_ci);
+                }
+            }
+
+            if (mask != 0) {
+                FF(ufi_select_dpu(rank, &mask, each_dpu));
+                FF(ufi_wram_read(rank, mask, wram_array,
+                        wram_word_offset, nb_of_words));
+            }
+        }
+        return;
+end:
+        std::cout<<"ReceiveFromRankWRAM ERROR"<<std::endl;
+        exit(0);
+}
+
+    void ReceiveFromWRAM(uint8_t **buffers, uint32_t symbol_base_offset,
+                        uint32_t symbol_offset, uint32_t length,
+                        bool async_transfer) {
+        symbol_offset += symbol_base_offset;
+        // printf("Heap Pointer Offset: %lx\n", GetSymbolOffset(DPU_MRAM_HEAP_POINTER_NAME));
+        // printf("Symbol Offset: %lx\n", symbol_offset);
+        uint32_t wram_word_offset = symbol_offset >> 2;
+        uint32_t nb_of_words = length >> 2;
+
+        for (size_t i = 0; i < nr_of_ranks; i ++) {
+            ReceiveFromRankWRAM(&buffers[i * MAX_NR_DPUS_PER_RANK],
+                                wram_word_offset, nb_of_words, ranks[i]);
+        }
+        // parlay::parallel_for(
+        //     0, nr_of_ranks,
+        //     [&](size_t i) {
+        //         ReceiveFromRankWRAM(&buffers[i * MAX_NR_DPUS_PER_RANK],
+        //                             wram_word_offset, nb_of_words, ranks[i]);
+        //     },
+        //     1, false);
+    }
+
+    void ReceiveFromMRAM(uint8_t **buffers, uint32_t symbol_base_offset,
+                        uint32_t symbol_offset, uint32_t length,
+                        bool async_transfer) {
+        assert(symbol_base_offset & MRAM_ADDRESS_SPACE);
+        symbol_offset += symbol_base_offset ^ MRAM_ADDRESS_SPACE;
+        auto send = [&](size_t i) {
             DPU_ASSERT(dpu_switch_mux_for_rank_expr(ranks[i], true));
-            ReceiveFromRank(&buffers_alligned[i * MAX_NR_DPUS_PER_RANK],
-                            symbol_offset, base_addrs[i], length);
-        }, 1, false);
+            ReceiveFromRankMRAM(&buffers[i * MAX_NR_DPUS_PER_RANK],
+                                symbol_offset, base_addrs[i], length);
+        };
+
+        for (size_t i = 0; i < nr_of_ranks; i ++) {
+            send(i);
+        }
+        // parlay::parallel_for(0, nr_of_ranks, send, 1, false);
 
         // unused. too slow for unknown reason.
         // auto fine_grained_work_stealing = [&]() {
@@ -344,7 +477,8 @@ class DirectPIMInterface : public PIMInterface {
         //                     for (int i = 0; i < MAX_NR_DPUS_PER_RANK; i++) {
         //                         uint8_t *target =
         //                             buffers_alligned[rank_id *
-        //                                                  MAX_NR_DPUS_PER_RANK +
+        //                                                  MAX_NR_DPUS_PER_RANK
+        //                                                  +
         //                                              i];
         //                         if (target == nullptr) {
         //                             buffers_local[i] = nullptr;
@@ -352,11 +486,11 @@ class DirectPIMInterface : public PIMInterface {
         //                             buffers_local[i] = target + offset;
         //                         }
         //                     }
-        //                     ReceiveFromRank(
+        //                     ReceiveFromRankMRAM(
         //                         buffers_local, symbol_offset + offset,
         //                         base_addrs[rank_id], length - offset);
         //                 } else {
-        //                     ReceiveFromRank(
+        //                     ReceiveFromRankMRAM(
         //                         &buffers_alligned[rank_id *
         //                                           MAX_NR_DPUS_PER_RANK],
         //                         symbol_offset, base_addrs[rank_id], length);
@@ -365,20 +499,60 @@ class DirectPIMInterface : public PIMInterface {
         //             // Middle ranks
         //             for (size_t rank_id = rank_id_start + 1;
         //                  rank_id < rank_id_end; rank_id++) {
-        //                 ReceiveFromRank(
-        //                     &buffers_alligned[rank_id * MAX_NR_DPUS_PER_RANK],
-        //                     symbol_offset, base_addrs[rank_id], length);
+        //                 ReceiveFromRankMRAM(
+        //                     &buffers_alligned[rank_id *
+        //                     MAX_NR_DPUS_PER_RANK], symbol_offset,
+        //                     base_addrs[rank_id], length);
         //             }
         //             // Last rank
         //             if (rank_id_end > rank_id_start) {
         //                 size_t rank_id = rank_id_end;
         //                 size_t last_rank_len = end % length;
-        //                 ReceiveFromRank(
-        //                     &buffers_alligned[rank_id * MAX_NR_DPUS_PER_RANK],
-        //                     symbol_offset, base_addrs[rank_id], last_rank_len);
+        //                 ReceiveFromRankMRAM(
+        //                     &buffers_alligned[rank_id *
+        //                     MAX_NR_DPUS_PER_RANK], symbol_offset,
+        //                     base_addrs[rank_id], last_rank_len);
         //             }
         //         });
         // };
+    }
+
+    void ReceiveFromPIM(uint8_t **buffers, std::string symbol_name,
+                        uint32_t symbol_offset, uint32_t length,
+                        bool async_transfer) {
+        // Please make sure buffers don't overflow
+        assert(DirectAvailable(buffers, symbol_name, symbol_offset, length,
+                               async_transfer));
+
+        uint32_t symbol_base_offset = GetSymbolOffset(symbol_name);
+
+        // Skip disabled PIM modules
+        uint8_t *buffers_alligned[MAX_NR_RANKS * MAX_NR_DPUS_PER_RANK];
+        {
+            uint32_t offset = 0;
+            for (uint32_t i = 0; i < nr_of_ranks; i++) {
+                for (int j = 0; j < MAX_NR_DPUS_PER_RANK; j++) {
+                    if (ranks[i]->dpus[j].enabled) {
+                        buffers_alligned[i * MAX_NR_DPUS_PER_RANK + j] =
+                            buffers[offset++];
+                    } else {
+                        buffers_alligned[i * MAX_NR_DPUS_PER_RANK + j] =
+                            nullptr;
+                    }
+                }
+            }
+            assert(offset == nr_of_dpus);
+        }
+
+        if (symbol_base_offset & MRAM_ADDRESS_SPACE) {  // receive from mram
+            // Only support heap pointer at present
+            assert(symbol_name == DPU_MRAM_HEAP_POINTER_NAME);
+            ReceiveFromMRAM(buffers_alligned, symbol_base_offset, symbol_offset,
+                            length, async_transfer);
+        } else {  // receive from wram
+            ReceiveFromWRAM(buffers_alligned, symbol_base_offset, symbol_offset,
+                            length, async_transfer);
+        }
     }
 
     void SendToPIM(uint8_t **buffers, std::string symbol_name,
@@ -388,36 +562,42 @@ class DirectPIMInterface : public PIMInterface {
         assert(DirectAvailable(buffers, symbol_name, symbol_offset, length,
                                async_transfer));
 
-        symbol_offset += GetSymbolOffset(symbol_name);
+        assert(GetSymbolOffset(symbol_name) & MRAM_ADDRESS_SPACE);
+        symbol_offset += GetSymbolOffset(symbol_name) ^ MRAM_ADDRESS_SPACE;
 
         // Skip disabled PIM modules
-        uint8_t* buffers_alligned[MAX_NR_RANKS * MAX_NR_DPUS_PER_RANK];
+        uint8_t *buffers_alligned[MAX_NR_RANKS * MAX_NR_DPUS_PER_RANK];
         {
             uint32_t offset = 0;
             for (uint32_t i = 0; i < nr_of_ranks; i++) {
                 for (int j = 0; j < MAX_NR_DPUS_PER_RANK; j++) {
                     if (ranks[i]->dpus[j].enabled) {
-                        buffers_alligned[i * MAX_NR_DPUS_PER_RANK + j] = buffers[offset++];
+                        buffers_alligned[i * MAX_NR_DPUS_PER_RANK + j] =
+                            buffers[offset++];
                     } else {
-                        buffers_alligned[i * MAX_NR_DPUS_PER_RANK + j] = nullptr;
+                        buffers_alligned[i * MAX_NR_DPUS_PER_RANK + j] =
+                            nullptr;
                     }
                 }
             }
             assert(offset == nr_of_dpus);
         }
 
-        parlay::parallel_for(0, nr_of_ranks, [&](size_t i) {
-            DPU_ASSERT(dpu_switch_mux_for_rank_expr(ranks[i], true));
-            SendToRank(&buffers_alligned[i * MAX_NR_DPUS_PER_RANK],
-                            symbol_offset, base_addrs[i], length, i);
-        }, 1, false);
-
+        parlay::parallel_for(
+            0, nr_of_ranks,
+            [&](size_t i) {
+                DPU_ASSERT(dpu_switch_mux_for_rank_expr(ranks[i], true));
+                SendToRankMRAM(&buffers_alligned[i * MAX_NR_DPUS_PER_RANK],
+                               symbol_offset, base_addrs[i], length, i);
+            },
+            1, false);
 
         // Find physical address for each rank
         // for (uint32_t i = 0; i < nr_of_ranks; i++) {
         //     dpu_lock_rank(ranks[i]);
         //     DPU_ASSERT(dpu_switch_mux_for_rank_expr(ranks[i], true)); // 2us
-        //     SendToRank(&buffers[i * DPU_PER_RANK], symbol_offset, base_addrs[i],
+        //     SendToRankMRAM(&buffers[i * DPU_PER_RANK], symbol_offset,
+        //     base_addrs[i],
         //                length, i);
         //     dpu_unlock_rank(ranks[i]);
         // }

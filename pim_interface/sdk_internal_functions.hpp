@@ -11,8 +11,14 @@ u32 ufi_select_all_even_disabled(struct dpu_rank_t *rank, u8 *ci_mask);
 u32 ufi_set_mram_mux(struct dpu_rank_t *rank, u8 ci_mask, dpu_ci_bitfield_t ci_mux_pos);
 u32 ufi_write_dma_ctrl(struct dpu_rank_t *rank, u8 ci_mask, u8 address, u8 data);
 u32 ufi_clear_dma_ctrl(struct dpu_rank_t *rank, u8 ci_mask);
+u32 ufi_select_dpu(struct dpu_rank_t *rank, u8 *ci_mask, u8 dpu);
 u32 ufi_select_dpu_even_disabled(struct dpu_rank_t *rank, u8 *ci_mask, u8 dpu);
 u32 ufi_read_dma_ctrl(struct dpu_rank_t *rank, u8 ci_mask, u8 *data);
+
+u32 ufi_wram_write(struct dpu_rank_t *rank, u8 ci_mask, u32 **src, u16 offset,
+		   u16 len);
+u32 ufi_wram_read(struct dpu_rank_t *rank, u8 ci_mask, u32 **dst, u16 offset,
+		  u16 len);
 
 // dpu_error_t dpu_check_wavegen_mux_status_for_rank(struct dpu_rank_t *rank, uint8_t expected);
 

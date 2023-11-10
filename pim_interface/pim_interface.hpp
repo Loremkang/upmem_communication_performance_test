@@ -6,6 +6,7 @@
 
 extern "C" {
     #include <dpu.h>
+    #include <dpu_rank.h>
 }
 
 const uint32_t MAX_NR_RANKS = 40;
@@ -40,10 +41,7 @@ class PIMInterface {
         }
     }
 
-    void Launch(bool async) {
-        auto async_parameter = async ? DPU_ASYNCHRONOUS : DPU_SYNCHRONOUS;
-        DPU_ASSERT(dpu_launch(dpu_set, async_parameter));
-    }
+    virtual void Launch(bool async) = 0;
 
     void sync() {
         DPU_ASSERT(dpu_sync(dpu_set));

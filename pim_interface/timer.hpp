@@ -37,8 +37,8 @@ public:
         std::cout << total_time << ' ' << call << std::endl;
     }
 
-private:
-    inline double get_timestamp() {
+// private:
+    static double get_timestamp() {
         timespec ts;
         clock_gettime(CLOCK_REALTIME, &ts);
         return ts.tv_sec + ts.tv_nsec / 1e9;

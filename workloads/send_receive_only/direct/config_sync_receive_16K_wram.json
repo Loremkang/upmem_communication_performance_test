@@ -1,0 +1,13 @@
+{
+    "interface_type" : "direct",
+    "nr_ranks" : -1,
+    "nr_iters" : 1000,
+    "workload": [
+        {
+            "type" : "receive",
+            "target" : "WRAM",
+            "total_length" : 16384,
+            "mode" : "sync"
+        }
+    ]
+}

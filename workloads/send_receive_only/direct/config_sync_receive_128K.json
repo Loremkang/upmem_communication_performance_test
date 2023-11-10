@@ -1,0 +1,12 @@
+{
+    "interface_type" : "direct",
+    "nr_ranks" : -1,
+    "nr_iters" : 1000,
+    "workload": [
+        {
+            "type" : "receive",
+            "total_length" : 131072,
+            "mode" : "sync"
+        }
+    ]
+}
