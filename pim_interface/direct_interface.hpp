@@ -291,9 +291,9 @@ class DirectPIMInterface : public PIMInterface {
 
                 auto ValidAddress = [&](uint8_t* address, int id) {
                     bool ok = true;
-                    if (!(address >= base_addrs[id] + (512ull << 20))) {
-                        ok = false;
-                    }
+                    // if (!(address >= base_addrs[id] + (512ull << 20))) {
+                    //     ok = false;
+                    // }
                     if (!((address + 128) <= base_addrs[id] + (8ull << 30))) {
                         ok = false;
                     }
@@ -301,6 +301,7 @@ class DirectPIMInterface : public PIMInterface {
                 };
 
                 if (!ValidAddress(ptr_dest + offset, id)) {
+                    printf("symbol_offset=%16llx\n", symbol_offset);
                     printf("ptr_dest=%016llx\n", ptr_dest);
                     printf("base_addr=%016llx\n", base_addrs[id]);
                     printf("offset=%d\n", offset);
