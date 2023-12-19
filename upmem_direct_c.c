@@ -11,8 +11,8 @@ extern "C" {
   void deleteDirectPIMInterface(XDirectPIMInterface* self) {
     delete (cast_to_cpp(self));
   }
-  void SendToRank(XDirectPIMInterface* self, uint8_t **buffers, uint32_t symbol_offset, uint8_t *ptr_dest, uint32_t length, int id) {
-    cast_to_cpp(self)->SendToRank(buffers, symbol_offset, ptr_dest, length, id);
+  void SendToRankMRAM(XDirectPIMInterface* self, uint8_t **buffers, uint32_t symbol_offset, uint8_t *ptr_dest, uint32_t length, int id) {
+    cast_to_cpp(self)->SendToRankMRAM(buffers, symbol_offset, ptr_dest, length, id);
   }
   void allocate(XDirectPIMInterface* self, uint32_t nr_of_ranks, char* binary) {
     std::string binary2 = std::string(binary);
